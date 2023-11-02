@@ -1,0 +1,2 @@
+django.core.exceptions.ImproperlyConfigured: Cannot import ASGI_APPLICATION module 'djchat.routing'
+Solve: asgi -> channels version -> django version => Must check version and compatible between packages (pypi site)

@@ -1,0 +1,15 @@
+Django
+wheel
+channels
+channels-redis
+selenium
+djangorestframework
+markdown
+django-filter
+django-rest-swagger
+git+https://github.com/ubernostrum/django-registration.git
+django-crispy-forms==2.0 # error with django-crispy-forms-2.1
+six
+django-webpack-loader==0.7.0
+crispy-bootstrap4
+django-cors-headers
