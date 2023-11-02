@@ -162,8 +162,8 @@ STATIC_URL = '/static/'
 # Channels Configuration Options
 # https://channels.readthedocs.io/en/latest/
 
-# ASGI_APPLICATION = "djchat.routing.application"
-ASGI_APPLICATION = "djchat.asgi.application"
+ASGI_APPLICATION = "djchat.routing.application"
+# ASGI_APPLICATION = "djchat.asgi.application"
 # CHANNEL_LAYERS = {
 #     'default': {
 #         'BACKEND': 'channels_redis.core.RedisChannelLayer',
