@@ -19,7 +19,8 @@ export default {
     initializeWebSocketSupport() {
       var _this = this;
       var chatSocket = new WebSocket(
-        "ws://" + window.location.host + "/ws/notifications/"
+        // "ws://" + window.location.host + "/ws/notifications/",
+        "ws://" + "localhost:8001" + "/ws/notifications/"
       );
       chatSocket.onmessage = async function(e) {
         var data = JSON.parse(e.data);
