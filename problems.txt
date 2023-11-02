@@ -1,2 +1,4 @@
 django.core.exceptions.ImproperlyConfigured: Cannot import ASGI_APPLICATION module 'djchat.routing'
 Solve: asgi -> channels version -> django version => Must check version and compatible between packages (pypi site)
+
+start command: cd djchat && python manage.py migrate && export DJANGO_SUPERUSER_EMAIL=xxx@email.com && export DJANGO_SUPERUSER_USERNAME=xxx && export DJANGO_SUPERUSER_PASSWORD=xxx && python manage.py createsuperuser --noinput && daphne -b 0.0.0.0 djchat.asgi:application

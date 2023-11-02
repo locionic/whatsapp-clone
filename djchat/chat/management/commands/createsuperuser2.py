@@ -20,6 +20,12 @@ class Command(createsuperuser.Command):
             action="store_true",
             help="Exit normally if the user already exists.",
         )
+        # parser.add_argument(
+        #     "--username",
+        #     dest="username",
+        #     default=None,
+        #     help="Specifies the username for the superuser.",
+        # )
  
     def handle(self, *args, **options):
         password = options.get("password")
