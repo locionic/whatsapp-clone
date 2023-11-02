@@ -13,6 +13,9 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 from pathlib import Path
 
+# import mimetypes
+# mimetypes.add_type("text/css", ".css", True)
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 # BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,7 +37,7 @@ ALLOWED_HOSTS = ["*"]
 # Application definition
 
 INSTALLED_APPS = [
-    'daphne',
+    # 'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -58,7 +61,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware', # here
+    # 'whitenoise.middleware.WhiteNoiseMiddleware', # staticfiles will not serve cuz mimetype error if lack of this line
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -139,7 +142,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
 
-STATIC_URL = '/static/'
+# STATIC_URL = '/static/'
 
 # STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 # VENV_PATH = os.path.dirname(BASE_DIR)
@@ -154,7 +157,7 @@ STATICFILES_DIRS = (
     os.path.join(BASE_DIR, 'dist'),
     os.path.join(BASE_DIR, 'static'),
 )
-# STATIC_ROOT = os.path.join(BASE_DIR, 'public')
+# STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 STATIC_URL = '/static/'
 
 
@@ -162,22 +165,15 @@ STATIC_URL = '/static/'
 # Channels Configuration Options
 # https://channels.readthedocs.io/en/latest/
 
-# ASGI_APPLICATION = "djchat.routing.application"
-ASGI_APPLICATION = "djchat.asgi.application"
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             # "hosts": [('127.0.0.1', 6379)],
-#             "hosts": ["redis://:Be6RO6BKfnx7M7SRPmt8vwdQfCPigpTA@redis-13637.c61.us-east-1-3.ec2.cloud.redislabs.com:13637/0"],
-#         },
-#     },
-# }
-
+ASGI_APPLICATION = "djchat.routing.application"
 CHANNEL_LAYERS = {
     'default': {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    }
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            # "hosts": [('127.0.0.1', 6379)],
+            "hosts": ["redis://:Be6RO6BKfnx7M7SRPmt8vwdQfCPigpTA@redis-13637.c61.us-east-1-3.ec2.cloud.redislabs.com:13637/0"],
+        },
+    },
 }
 
 

@@ -7,15 +7,32 @@ For more information on this file, see
 https://docs.djangoproject.com/en/3.0/howto/deployment/asgi/
 """
 
-import os
-
+# import os
 # from django.core.asgi import get_asgi_application
-from channels.routing import get_default_application
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
-
+# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
 # application = get_asgi_application()
 
-import django
-django.setup()
-application = get_default_application()
+# daphne
+# import os
+# from channels.routing import get_default_application
+# import django
+# django.setup()
+# application = get_default_application()
+
+# docs tutor
+import os
+from channels.routing import ProtocolTypeRouter
+from django.core.asgi import get_asgi_application
+from channels.auth import AuthMiddlewareStack
+from channels.routing import ProtocolTypeRouter, URLRouter
+
+import chat.routing
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
+    'websocket': AuthMiddlewareStack(
+        URLRouter(
+            chat.routing.websocket_urlpatterns
+        )
+    ),
+})
