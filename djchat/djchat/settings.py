@@ -35,6 +35,9 @@ ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     'daphne',
+    'channels',
+
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -46,7 +49,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_swagger',
 
-    'channels',
+    # 'channels',
     'crispy_bootstrap4',
     'crispy_forms',
     'webpack_loader',
@@ -220,3 +223,5 @@ WEBPACK_LOADER = {
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:8080',
 ]
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

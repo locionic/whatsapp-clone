@@ -13,8 +13,8 @@ six
 django-webpack-loader==0.7.0
 crispy-bootstrap4
 django-cors-headers
-channels[daphne]
 whitenoise
 daphne
+# channels[daphne]
 # gunicorn
 # waitress
