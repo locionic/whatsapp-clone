@@ -1,9 +1,9 @@
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
-import os
-import django
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "djchat.settings")
-django.setup()
+# import os
+# import django
+# os.environ.setdefault("DJANGO_SETTINGS_MODULE", "djchat.settings")
+# django.setup()
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
