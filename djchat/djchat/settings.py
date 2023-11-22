@@ -154,7 +154,7 @@ STATIC_URL = '/static/'
 # STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
 STATICFILES_DIRS = (
-    os.path.join(BASE_DIR, 'dist'),
+    # os.path.join(BASE_DIR, 'dist'),
     os.path.join(BASE_DIR, 'static'),
 )
 # STATIC_ROOT = os.path.join(BASE_DIR, 'public')
@@ -224,4 +224,4 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:8080',
 ]
 
-# DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

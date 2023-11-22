@@ -34,7 +34,8 @@ def friendship_request_canceled_callback(sender, to_user, **kwargs):
 
 @receiver(friendship_request_accepted)
 def friendship_request_accepted_callback(sender, to_user, from_user, **kwargs):
-    room, _ = Room.objects.get_or_create(kind=1)
+    # room, _ = Room.objects.get_or_create(kind=1)
+    room = Room.objects.create(kind=1)
     room.participants.add(to_user.id, from_user.id)
     room.signal_to_room('update_rooms', data={})
     async_to_sync(channel_layer.group_send)(

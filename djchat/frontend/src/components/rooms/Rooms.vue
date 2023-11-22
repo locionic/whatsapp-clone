@@ -23,11 +23,11 @@
       </div>
 
       <!-- Footer Copyright -->
-      <div class="text-right mr-5">
+      <!-- <div class="text-right mr-5">
         <a style="font-size: 9px;" href="http://www.freepik.com"
           >Background vector created by kjpargeter - www.freepik.com</a
         >
-      </div>
+      </div> -->
     </div>
   </div>
 </template>

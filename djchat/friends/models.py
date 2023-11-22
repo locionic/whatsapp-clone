@@ -112,11 +112,11 @@ class FriendshipRequest(models.Model):
 
     def accept(self):
         """ Accept this friendship request """
-        relation1 = Friend.objects.create(
+        relation1 = Friend.objects.get_or_create(
             from_user=self.from_user, to_user=self.to_user
         )
 
-        relation2 = Friend.objects.create(
+        relation2 = Friend.objects.get_or_create(
             from_user=self.to_user, to_user=self.from_user
         )
 
