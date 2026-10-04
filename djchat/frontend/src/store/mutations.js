@@ -120,11 +120,12 @@ const mutations = {
   // describe one query, so a second search replaces the first instead of
   // accumulating with it. `ADD_UNREAD_MESSAGES` is the same shape.
   SET_SEARCH_RESULTS(state, messages) {
-    state.searchResults = {};
-    if (messages)
+    if (messages) {
+      state.searchResults = {};
       messages.forEach(element => {
         Vue.set(state.searchResults, element.id, element);
       });
+    }
   },
   SET_SELECTED_ROOM(state, roomId) {
     state.selectedRoom = roomId;
@@ -159,12 +160,60 @@ const mutations = {
       )
     );
   },
+  // A message someone deleted, for everyone. Six entries and not one: the bubble
+  // plus five bookkeeping entries, and `REMOVE_FAILED_MESSAGE` clears two of
+  // those five -- so this is not that mutation under a different key. The three
+  // id-keyed receipts are the whole reason.
+  //
+  // `roomMessages` is keyed by room and the announce carries only the id, so the
+  // room is found by searching rather than told. That search is also the only
+  // source of `front_key` -- `receivedMessages` is keyed on it and nothing else
+  // in the payload carries it.
+  //
+  // The rest are cleared by id regardless of whether the search found anything,
+  // and that asymmetry is deliberate: `unreadMessages` can hold an entry for a
+  // message this client never loaded (its room was never opened), so a badge for a
+  // deleted message can outlive the message itself on this screen alone.
+  REMOVE_MESSAGE(state, { message_id }) {
+    let found = null;
+    for (let room_id in state.roomMessages) {
+      const message = state.roomMessages[room_id].find(
+        one => one.id === message_id
+      );
+      if (message) {
+        found = { room_id, message };
+        break;
+      }
+    }
+    if (found) {
+      Vue.delete(state.receivedMessages, found.message.front_key);
+      state.sendingPool.delete(found.message.front_key);
+      Vue.set(
+        state.roomMessages,
+        found.room_id,
+        state.roomMessages[found.room_id].filter(one => one.id !== message_id)
+      );
+    }
+    Vue.delete(state.unreadMessages, message_id);
+    Vue.delete(state.allReceived, message_id);
+    Vue.delete(state.allRead, message_id);
+  },
+  // `state.unreadMessages = {}` is inside the guard, not above it, which is the
+  // other six guards' shape too and was not this one's. It used to sit above,
+  // so a response missing the `messages` key -- a malformed body, not a
+  // rejection -- reset the map and then skipped the loop: every unread badge in
+  // the sidebar gone, no error anywhere. The key is always sent today
+  // (`UnreadMessagesAPIView.get` builds `{'messages': ...}` as a dict literal),
+  // so this arm is unreachable -- which is the whole reason it is a guard rather
+  // than a crash report. `[]` is truthy, so a user with nothing unread still
+  // clears their badges, which is the case the reset exists for.
   ADD_UNREAD_MESSAGES(state, messages) {
-    state.unreadMessages = {};
-    if (messages)
+    if (messages) {
+      state.unreadMessages = {};
       messages.forEach(element => {
         Vue.set(state.unreadMessages, element.id, element.room);
       });
+    }
   },
   REMOVE_MESSAGE_FROM_UNREAD(state, message_id) {
     if (message_id in state.unreadMessages) {
@@ -185,17 +234,26 @@ const mutations = {
     Vue.set(state.allRead, message_id, true);
   },
   SET_SENT_INVITATIONS(state, sentInvitations) {
-    state.sentInvitations = {};
-    if (sentInvitations)
+    if (sentInvitations) {
+      state.sentInvitations = {};
       sentInvitations.forEach(element => {
         Vue.set(state.sentInvitations, element.id, element);
       });
+    }
   },
+  // The only one of this set with no guard at all until now, which is why it
+  // never showed up among the uncovered branches -- there was no branch to
+  // cover. Same trust boundary as the one above and the same reason: this is fed
+  // straight from a response body, and a body without the array here is a
+  // `TypeError` inside a Vuex mutation rather than a rejection a caller can
+  // catch. Both siblings now read the same way, so the pair can be read once.
   SET_RECEIVED_INVITATIONS(state, receivedInvitations) {
-    state.receivedInvitations = {};
-    receivedInvitations.forEach(element => {
-      Vue.set(state.receivedInvitations, element.id, element);
-    });
+    if (receivedInvitations) {
+      state.receivedInvitations = {};
+      receivedInvitations.forEach(element => {
+        Vue.set(state.receivedInvitations, element.id, element);
+      });
+    }
   },
   SET_USER_PROFILE(state, userProfile) {
     state.userProfile = userProfile;

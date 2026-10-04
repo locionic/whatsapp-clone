@@ -89,6 +89,37 @@ test("asking for the newest messages asks for no offset at all", async () => {
   expect(requestedUrl()).toBe("/api/v1/messages/7");
 });
 
+test("a page of history is filed under the room it was asked for", async () => {
+  // The two commits after a history fetch, neither of which anything pinned.
+  // `fetchPastMessages` is the only action that writes a *caller's* room rather
+  // than its own endpoint's, so both halves of the payload are the caller's to
+  // get wrong.
+  //
+  // `roomId` first, because it is the one that fails silently. `MessagesSection`
+  // reads `state.roomMessages[this.$store.state.selectedRoom]`, so a page filed
+  // under anything else is fetched, dispatched, merged, sorted and then never
+  // displayed: scrolling up loads history that does not appear, forever, with no
+  // error anywhere. The test below drives the action rather than the component,
+  // so it does not need the store to be Vue-observable to catch it.
+  mockGet.mockResolvedValueOnce({
+    data: { messages: [{ id: 2, room: 7 }], users: [{ id: 9, username: "bob" }] }
+  });
+  const commit = jest.fn();
+
+  await actions.fetchPastMessages({ commit }, { roomId: 7, firstMessageId: 3 });
+
+  expect(commit).toHaveBeenCalledWith("LINK_PAST_MESSAGES_TO_ROOM", {
+    pastMessages: [{ id: 2, room: 7 }],
+    roomId: 7
+  });
+  // And the authors those messages resolve against. `state.users` is additive -
+  // `SET_USERS` merges and never empties - so a peer you have not met until this
+  // page is exactly the one whose author would come back missing.
+  expect(commit).toHaveBeenCalledWith("SET_USERS", [
+    { id: 9, username: "bob" }
+  ]);
+});
+
 test("a sent message carries the key that ties it to the server's copy", async () => {
   // The guard on A2, and the exact set of keys - `room`, `body`, `front_key`,
   // nothing else. `front_key` is a client-generated uuid the server has no other

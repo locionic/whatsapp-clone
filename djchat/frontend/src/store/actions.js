@@ -252,6 +252,21 @@ const actions = {
         .catch(error => reject(error));
     });
   },
+  deleteMessage(none, messageId) {
+    // Same shape as `deleteRoom`, and the same reason: the bubble is taken off
+    // by the `message_delete` push rather than optimistically here, so this
+    // promise carries no store work. The caller still has to handle the
+    // rejection -- `SentMessage` dispatches this from a click handler, and a
+    // rejected dispatch nothing awaits is unhandled.
+    return new Promise((resolve, reject) => {
+      axios
+        .post(`/api/v1/messages/${messageId}/delete`)
+        .then(response => {
+          resolve(response);
+        })
+        .catch(error => reject(error));
+    });
+  },
   fetchUserProfile({ commit }) {
     return new Promise((resolve, reject) => {
       axios

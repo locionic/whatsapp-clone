@@ -61,6 +61,17 @@ export default {
           _this.$store.dispatch("fetchSentInvitations").catch(ignoreFailure);
         } else if (message === "writing") {
           EventBus.$emit("writing", data.data);
+        } else if (message === "message_delete") {
+          // The server announces to every participant including whoever clicked,
+          // so the sender's own copy leaves by this path too -- which is why
+          // nothing removes the bubble optimistically. One code path, and no
+          // snapshot to put back if the request turns out to be refused.
+          _this.$store.commit("REMOVE_MESSAGE", data.data);
+          // The sidebar's preview is `RoomSerializer.get_last_message`, so
+          // without this the text you just deleted stays in the room list.
+          // The room's `last_activity` is deliberately not bumped server-side,
+          // which is what makes this refetch necessary rather than incidental.
+          _this.$store.dispatch("fetchRooms").catch(ignoreFailure);
         } else if (message === "update_message") {
           const { kind, message_id } = data.data;
           if (kind === "all_received") {

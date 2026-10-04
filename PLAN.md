@@ -6328,6 +6328,751 @@ so **no bundle rebuild**. `users/api/serializers.py` and
 were restored; the invite-user `username` -> `uname` row above was measured and
 not written into the plan's "what changed" because it needs no test.
 
+### 94. The client store, which had never been reverted on purpose
+
+Item 88 swept `chat/models.py` and found two real defects in the query it builds.
+`store/mutations.js` is that model's counterpart on the client -- 214 lines, the
+piece that decides what the thread actually looks like -- and it had had exactly
+**two** behaviours reverted on purpose, both in item 81's six-case frontend
+sweep. Item 93 having just established that the pytest suite is blind to the
+client/server seam, the obvious next question was whether the jest suite is
+blind to the store's own logic, and nobody had asked it.
+
+Twenty-six mutations, every one run against the **whole** jest suite, because a
+narrow run reports a false survivor whenever the test that would notice lives in
+another file.
+
+**23 killed.** `room_message_order` and `send_confirmation` carry four each,
+`failed_send` three, and `mutation_contracts`, `unread_axis`,
+`receipt_reactivity`, `message_search`, `incoming_message`, `load_path` one apiece
+-- every mutation killed by exactly one suite, which is the shape a healthy
+suite has.
+
+**Two of the mutations never ran.** `state.sendingPool.delete(front_key)` and
+`Vue.delete(state.receivedMessages, front_key)` each appear **twice** in the
+file -- once in `LINK_MESSAGES_TO_ROOM`, once in `REMOVE_FAILED_MESSAGE` -- so
+the anchor check refused them rather than mutating both at once and recording a
+kill that proved nothing. Re-run with the surrounding lines as the anchor: both
+killed, by `send_confirmation` and `room_message_order` respectively. **A
+mutation that is not applied is not a kill**, and the harness saying so is the
+only reason the count above is 23 and not 25.
+
+**M2 survived, and it is a real defect.** Dropping the `undefined` arm of
+`position` -- `message => message.id` -- is not the same as flipping `Infinity`
+to `-Infinity`, and that is why item 81's sweep did not find it. `Infinity`
+sorts a message with no id to the end; `undefined` makes the comparator return
+`NaN`, and a `NaN` comparator leaves the array **as it was**. Measured outside
+the suite, in Node, over the arrival orders the store can actually see:
+
+    merge([],      [unconfirmed, confirmed])   correct b,a   mutated a,b
+    merge([uncon], [confirmed])                correct b,a   mutated a,b
+    merge([uncon, uncon], [confirmed])         correct b,a,c mutated a,c,b
+    merge([confirmed, uncon], [confirmed])     correct b,c,a mutated c,a,b
+
+Four of six orders differ, and every difference puts the unconfirmed message
+**above** a confirmed one -- which is the precise bug this file's own header
+warns about ("put the newest message at the top of the thread"), reached by a
+different route.
+
+It is reachable in the app, and the test below walks the route: `SendForm`
+commits `LINK_MESSAGES_TO_ROOM` before the server answers, so an optimistic
+message is already in the array with no `id`; `fetchPastMessages` then commits
+`LINK_PAST_MESSAGES_TO_ROOM` against that same room. Type a message and scroll up
+to read history while it is still in flight.
+
+**The other two survivors are not gaps, and saying so is the point.**
+
+*M11* -- seeding a brand-new room through `mergeMessages` instead of `[element]`
+-- cannot differ by construction. That branch is the `else` of
+`if (element.room in state.roomMessages)`, so the array it is merging into is
+`undefined`, and `mergeMessages(undefined, [x])` is `[x]`. It was a badly chosen
+mutation, not a hole in the suite. Recorded rather than quietly dropped,
+because a survivor that was never a real mutation and a survivor that was are
+the same line in the output.
+
+*M10* -- removing the `receivedMessages` seen-check -- **is** observable in
+isolation, and I checked rather than assumed. In Node, with the same
+`front_key` re-arriving carrying *fresher* content, the guard drops the newer
+copy and the mutation keeps it: `guard on` returns the first body, `guard off`
+returns the second. So the mutation is not vacuous.
+
+It is unreachable anyway. Nothing in the store ever mutates a message object in
+place -- `grep` for `message.x =`, `Object.assign(message`, `Vue.set(message`
+across every `.vue` and `.js` returns one line, and it is the comment at
+`mutations.js:53` explaining why `Object.assign` was *rejected*. So a re-arrival
+of a `front_key` is byte-identical to the copy already held, and the identical
+re-arrival measures as not observable. The receipts that *would* differ are not
+written onto the message at all: `MARK_MESSAGE_ALL_RECEIVED` and
+`MARK_MESSAGE_ALL_READ` set `state.allReceived[id]` and `state.allRead[id]`,
+separate maps. **The dedupe is a performance guard against re-sorting a room,
+not a freshness guard, and no test should be written to pin one.**
+
+pytest **261** unchanged. jest **235** -> **236**, **42** suites unchanged. **No
+production file changed** -- one test -- so **no bundle rebuild**. `mutations.js`
+verified free of residue by exact-string check on all three surviving anchors
+before recording, after twenty-six writes and restores.
+
+### 95. The action layer, whose commit block nothing read
+
+`store/actions.js` is 306 lines and the largest file under `src/`. Item 54 swept
+its two conditionals and item 81 took one branch out of the initial load, and
+nothing since has read the other half of the file: **the twenty-four `commit`
+calls**, which are the entire contract between what the server answers and what
+the store holds. Thirty mutations, every one run against the **whole** jest
+suite.
+
+**26 killed**, and every kill came from exactly one suite -- `action_contracts`
+carries nine, `load_path` six, `action_requests` four, `message_search` two,
+`email_lookup_encoding` one, and `create_group` doubles up on A29/A30. That
+one-suite-per-mutation shape is the suite set working: no test is redundant and
+none is load-bearing for a neighbour.
+
+**A9 and A10 survived, and both are real.** `fetchPastMessages` is the only
+action that writes a *caller's* room rather than its own endpoint's, so both
+halves of its commit payload are the caller's to get wrong, and neither was
+pinned:
+
+- **`roomId` dropped from the payload.** The page is fetched, dispatched,
+  merged and sorted -- under `state.roomMessages[undefined]`.
+  `MessagesSection` reads `state.roomMessages[this.$store.state.selectedRoom]`, so
+  scrolling up loads history that **never appears**, with no error anywhere and
+  no way to tell from the UI that it arrived. The existing two tests in
+  `action_requests.spec.js` pass `{ commit: jest.fn() }` and assert only the URL,
+  which is why the whole commit block was invisible: the mock was already
+  capturing everything needed to see it.
+- **`SET_USERS` dropped.** `state.users` is additive -- `SET_USERS` merges and
+  never empties -- so the peer you have not met until this page is exactly the
+  one whose author would come back missing, and `ReceivedMessage` resolves its
+  author unguarded.
+
+One test pins both, and it drives the action rather than the component, so it
+needs no Vue-observable store to catch either. Each mutation kills it and
+nothing else.
+
+**The other two survivors are not gaps, and one of them is my own error.**
+
+*A8* -- "the offset is always sent, even on a first open" -- was a badly chosen
+mutation: `let endpoint = true && firstMessageId` is arithmetically
+`firstMessageId`, the original expression, so it could not have differed. A7, the
+same ternary forced the other way, was killed. **A mutation that cannot change
+behaviour is a survivor that measures nothing**, and the only reason it is
+recorded as A8 rather than quietly dropped is that it would otherwise look
+identical to A9 in the table.
+
+*A12* -- swapping `SET_USERS` and `SET_SEARCH_RESULTS` in `searchMessages` --
+**is** worth chasing, because the comment above it argues for it explicitly:
+
+> `users` first, always: a result is rendered by `received-message`, which
+> resolves its author against `state.users` and dereferences that unguarded
+
+So I measured it rather than accepting the comment. A throwaway spec ran both
+orders against a real `Vue` instance with a `$watch` that resolves the author the
+unguarded way, one `$nextTick` apart:
+
+    PROBE users-first   -> ["bob"]
+    PROBE results-first -> ["bob"]
+    PROBE order observable: false
+
+**The order is not observable, and the comment's stated mechanism is not the
+mechanism.** Both commits are synchronous inside one `.then`, so Vue 2 flushes
+the re-render after both have landed and there is no tick in which a watcher,
+computed or render can see a hit whose author has not arrived. What the comment
+is *right* about is that `SET_USERS` has to happen at all; what it is *wrong*
+about is that the sequence does it.
+
+Not fixed in the source, deliberately. It is a comment, not a behaviour, and
+editing a file under `src/` would force the `static/dist/bundle.js` rebuild that
+"The build" section records as still being your call. The claim is recorded here
+instead, with the measurement, so the next reader who wants to swap those two
+lines knows it is safe and knows why the comment says otherwise.
+
+pytest **261** unchanged. jest **236** -> **237**, **42** suites unchanged. **No
+production file changed** -- one test -- so **no bundle rebuild**. `actions.js`
+verified free of residue by exact-string check on all five surviving anchors
+after thirty writes and restores. The probe spec was deleted in the same command
+that ran it; `tests/unit/` is back to its 42 specs plus the pre-existing
+`setup_render_errors.js`.
+
+### 96. The composer, whose entire effect on the store was mocked away
+
+Item 95 swept `store/actions.js`, the last of the store. This is the first sweep
+of a **component** in the project -- everything from item 83 to item 95 was
+backend or store -- and it went differently from all of them: **24 mutations, 6
+killed, 18 survived.** The most-covered component in the repo, and two thirds of
+it was unpinned.
+
+**The root cause is one line, and it is in every SendForm spec rather than in
+SendForm.** All five of them mount it with `commit: jest.fn()`. That is the right
+mock for a spec about the *component* -- the box clears, the text comes back,
+Enter sends, Shift+Enter does not -- and it means **no SendForm spec has ever
+inspected a commit.** The optimistic bubble's shape, the dispatch payload's
+`front_key`, whether the two commits happen, and their order are all invisible to
+a mock that records calls and asserts nothing about them.
+
+The other half is the mirror of items 61-68, one layer up. The five specs that
+*do* look at the store drive `mutations.js` directly with hand-built objects --
+`send_confirmation.spec.js:107-117` even reproduces the two commits in their
+documented order, **in its own fixture**. So the mutations are thoroughly pinned
+and the component that calls them is pinned by nothing, and neither half checks
+the other. That is the same shape as the `front_key` seam in item 93, where the
+server's half was tested and the client's half was not.
+
+Six survivors were already covered elsewhere, each by exactly one spec:
+`send_form_maxlength` (S1), `send_form_multiline` (S3), `send_form_draft_room_
+change` (S15, S24) and `failed_send` (S16, S17). **Fifteen needed
+`send_form_store_effects.spec.js`**, which mounts the real component against the
+real store and mocks only the two actions that would otherwise leave the building:
+
+    mine-only=15  also-others=0  survived=0  not-applied=0
+
+All fifteen, each killed by the new spec and by nothing else.
+
+**The commit order is the one worth writing down, and the obvious argument for it
+is wrong.** Three comments call the order load-bearing -- `mutations.js:69-76`,
+`mutations.js:143-150`, and `send_confirmation.spec.js:107` -- and none of the
+three can see the component change it, because the third *reproduces* the order
+in its fixture. Swapping the two lines does **not** crash, which is what I would
+have said without measuring: `mutations.js:77`'s
+`const inRoom = state.roomMessages[element.room] || []` absorbs the missing array,
+and `at === -1` appends through `mergeMessages`, so the bubble still appears with
+its clock and still takes the server's id on confirmation. A probe ran the real
+component through the whole lifecycle both ways:
+
+| | committed order | commits swapped |
+|---|---|---|
+| after send -- bubble | no id, `sending`, owner | **identical** |
+| after confirm -- bubble | `id 42`, no clock | **identical** |
+| after send -- `receivedMessages` | `[key]` | `[]` |
+| after confirm -- `receivedMessages` | `[]` | `[key]` |
+
+Nothing rendered differs at any step, which is exactly why twenty-four mutations
+called it a survivor. What the swap changes is *when* the key enters
+`receivedMessages` -- and in the swapped order it never leaves, which is the
+precise leak `mutations.js:73` records as fixed: "Every message a user sent
+therefore kept one permanent reactive entry for the rest of the session." The fix
+was made in the mutation; the component ordering that defeats it was never
+pinned, so swapping two lines would reinstate the leak with the whole suite green.
+
+**The typing indicator had a receiving half and no sending half.**
+`user_writing_listener.spec.js` pins `User.vue`'s subscription, its `$off` and its
+unguarded-author defect in full. `SendForm`'s half -- the 10-second throttle, both
+of its reset points, and the `&& this.room` guard -- was covered by nothing, and
+five mutations of it all survived. Unthrottled it is a POST **per keystroke**; and
+the timer never reopening is the worst of the five, because `timerId` stays
+truthy for the rest of the session and the indicator stops working entirely after
+your first keystroke, which no spec notices because every spec types once.
+
+**One survivor was pytest's, and I checked rather than recorded it as a gap.**
+`maxBody: 500` -> `501` survives jest completely, because
+`send_form_maxlength.spec.js:60` asserts `Number(limit) === wrapper.vm.maxBody` --
+a self-consistency check, and its own docstring says the *number* is "the Django
+test's job". Applied, it fails `test_the_client_cap_matches_the_body_limit` at
+`test_message_api.py:487`. That is the division of labour working in the good
+direction: jest pins that the attribute is bound, pytest pins what it is bound to.
+
+**Two survivors are decoration, and no test is written for either.** The
+`cursor-not-allowed` class when no chat is open (S4) is CSS on a button that is
+not actually `disabled`, and `checkText` (S7) is a `:)` -> emoji conversion
+dependency. Neither has a failure a person would describe as a bug.
+
+**Two things I got wrong, both the same way.** The harness first resolved
+`TARGET` against `frontend/` instead of the repo root, and then the `room` watcher
+ate the fixture twice: assigning `selectedRoom` *after* the mount trips the
+watcher, which clears `body`, so a `setData` that landed first is wiped on the
+next tick. The second one made "no chat open, no send" **pass for the wrong
+reason** -- the send bailed on empty text rather than on the room guard, so the
+test would have survived the guard being deleted. Deselect, await the tick, *then*
+type. Every pre-existing SendForm spec starts its store with `selectedRoom: 7`
+and so never meets this; it is in the new file's helper comment.
+
+pytest **261** unchanged. jest **237** -> **249** across **43** suites.
+**No production file changed** -- one new spec -- so **no bundle rebuild**.
+`SendForm.vue` verified byte-identical after 41 writes across both sweeps, the
+order probe's swap and the `maxBody` check.
+
+### 97. Deleting a message, which neither half of the app could do
+
+**Found by the method that had just proved itself blind, not by inventing a
+feature.** The Phase 2 survey came back empty, so the next move was the one it
+identified: look for a *capability* the app has next door and not here.
+`ContactProfile.vue:126` offers "Delete chat" and `deleteRoom` posts to a working
+route, so the app could throw away a whole conversation - and could not remove one
+message from one. `MessageViewSet` was a bare `viewsets.ViewSet` with only `list`
+and `create`, `chat/api/urls.py` had no message-level route, nothing under
+`frontend/src` dispatched one, and no spec on either side mentioned either.
+Anything you sent by mistake was permanent for both sides, which is the one thing
+a chat app is not allowed to be.
+
+**The permission half leads, because it is the feature's real content.** Two
+people in one room both have reason to reach the endpoint, so membership cannot be
+the check - authorship has to be, or the feature is a way to censor someone else's
+conversation. And both refusals answer **404 rather than 403**, so "that is not
+your message" and "that message is not yours to know about" are indistinguishable
+from outside. That follows the room delete
+(`get_object_or_404(request.user.rooms.all(), ...)`) and not message *create*,
+which raises `PermissionDenied` because publishing into a room you are not in is a
+different act from touching a row that already is yours.
+
+`MessageDeleteAPIView` in `chat/api/messageViews.py`, one line in `urls.py`, and
+**8 tests** in `chat/_tests/test_message_delete.py`: the delete happens; only the
+named message goes - ids are a sequence, so a delete filtered on the room would
+take the whole thread with it and still pass a test that only checked *a* message
+left; it is gone from the history; someone else's message 404s; a message in a
+room you were removed from 404s; a nonexistent id 404s; the announce reaches every
+participant; and **a refused delete announces nothing** - signalling before
+checking would tell both sides a message was deleted while it was still there, and
+the sender's own copy would vanish and then come back on the next fetch with
+nothing having happened.
+
+**Two amendments, and the second is the interesting one.** The announce first
+carried `front_key` beside `message_id`, on the reasoning that `message_id` cannot
+clear the front_key-keyed maps. True of the maps, irrelevant in practice: the
+client already holds the message as one object and reads the key off the message it
+found while removing it. The second key buys nothing, is one more thing to keep in
+step, and `front_key` is a `UUIDField` - so it would also have needed stringifying,
+or the client's own `uuid4()` string would never equal the server's. Dropped; the
+equality assertion on the payload is what stops it creeping back.
+
+**`Room.last_activity` is deliberately not bumped.** It is `auto_now`, so saving
+the room would float it to the top of the recents list for deleting something from
+last week. *Not* bumping it is what makes the client's `fetchRooms` after the push
+necessary rather than incidental - otherwise the sidebar keeps showing the text of
+a message that no longer exists, in the one place a deleted message is most
+visible.
+
+**Client: 19 tests, `tests/unit/message_delete.spec.js`, and the removal is driven
+by the socket rather than optimistically.** That is `room_delete`'s established
+shape and the cheaper design here: the server announces to every participant
+including whoever clicked, so one code path serves both sides and there is no
+optimistic copy to keep a snapshot of. The cost is a round trip, and if the socket
+is down the button appears to do nothing - which is *correct*, since nothing was
+deleted. A test pins that the action commits nothing, because `REMOVE_MESSAGE` is
+idempotent: a second removal path would cost nothing visible, so only an assertion
+keeps it to one.
+
+`REMOVE_MESSAGE` clears six entries, not one: the bubble, the front_key pair
+(`receivedMessages` and `sendingPool`) and the three id-keyed receipts. Those
+three are the whole reason it is not `REMOVE_FAILED_MESSAGE` under a different
+key, and the asymmetry is deliberate - `unreadMessages` can hold an entry for a
+message this client never loaded, so a badge for a deleted message can outlive the
+message on this screen alone, and it is cleared by id whether or not the search
+found anything.
+
+**The control is in the bubble, on your own messages only.**
+`MessagesSection.vue:140,158` already gates the component on `is_owner`, so that
+rule is the parent's and is not re-decided here. It is absent while
+`message.sending`, because `sending` means the id is `undefined` and the request
+would be a 404 the user can do nothing about. A refused delete says so on a
+`role="alert"` line, for the reason `ContactProfile.vue:134` and
+`MessagesSection.vue`'s `searchError` already do.
+
+**18 reversions over the five client files: 17 killed by the test each was aimed
+at, 0 survived, and one killed by a different mechanism.** Three findings:
+
+- **The one that is not a red test.** Reverting the `.catch` in the click handler
+  does not turn a test red, it takes the Node runner down: jest printed
+  `Error: 404 ... at invokeWithErrorHandling ... at processTicksAndRejections`
+  and never printed a `Tests:` summary at all. That is item 29's failure from the
+  other side - the spec did not fail so much as abort - and it is why the catch is
+  not optional. Without it the feature is not merely noisy, it is unmeasurable.
+- **A line I had written with nothing behind it.** `sendingPool.delete(...)` was
+  the fifth entry and no test asserted it, because the fixture's pool started
+  empty. The reachable window is narrow - the POST reached the server, the
+  response was lost, so the message exists and the client still believes it is in
+  flight - and it is exactly the window `REMOVE_FAILED_MESSAGE`'s comment
+  describes. Test written, then the reversion killed it.
+- **My own harness fault, and the lesson is item 96's.** The first run reported
+  `NOT APPLIED (anchor count 3)` on `Vue.delete(state.unreadMessages,
+  message_id)`: the four-space anchor is a substring of two deeper-indented lines
+  in the same file. A count above 1 is never a kill, and it is not a defect in the
+  code either - it means the harness is wrong.
+
+**Three things only *running* it caught, all of which would otherwise have
+shipped.**
+
+1. **The control broke three receipt specs.** It borrows the same
+   `material-icons` class as the ticks, so `read_receipts.spec.js`,
+   `receipt_reactivity.spec.js` and `send_confirmation.spec.js` - whose selectors
+   were written against a component rendering *three* icons and nothing else, and
+   said so in a comment - suddenly saw four. Fixed by narrowing all three to
+   `i.material-icons`, which is a **narrowing rather than a loosening**: the
+   control is a `button`, the receipts are `<i>`, so the three are still exactly
+   the three, and a receipt changed to a `<span>` now fails where it would have
+   passed before.
+2. **`group-hover:opacity-100` cannot work in this build.** Hover-revealed, the
+   way chat apps do it, was the first attempt. `tailwind.config.js` sets
+   `variants.opacity` to `["responsive", "hover", "focus"]`, so `group-hover` is
+   never generated: the rebuild produced **zero** `group-hover` rules, and the
+   button would have sat at `opacity-0` for every user, permanently invisible.
+   And even with the variant added, a control that appears only on hover is
+   unreachable by touch. Grey always, red on approach - no config change, one class
+   list, and it works for everyone.
+3. **Only the build could have caught it.** No jest test and no pytest test looks at
+   the generated stylesheet, so a class this build cannot generate is invisible to
+   both. `bundle.css` is now checked by grep after a rebuild: `text-gray-400` and
+   `hover:text-red-600` present, `group-hover` 0.
+
+**pytest 261 -> 269. jest 249 -> 268 across 44 suites.** `npm run lint` is clean on
+the four touched sources; it was run with `--no-fix` and the one reformat it wanted
+was then made by hand, so it could not rewrite the other fifty files the way
+`The build` records. The bundle was rebuilt and verified rather than assumed:
+`message_delete`, `REMOVE_MESSAGE`, `Delete message` and `This message could not be
+deleted` are all in `static/dist/bundle.js`, item 2's `reconnectWebSocket` is still
+there, and `onclose=function(){}` is still 0.
+
+**Two limits, recorded rather than glossed.** There is **no confirmation step** -
+this is a hard delete with no undo, behind one small button. That is a deliberate
+match to the app's existing destructive affordance, since `ContactProfile.vue:126`
+throws away a whole conversation on a single unconfirmed click too, and inventing a
+second convention needs a second reason. And there is **no "delete for me only"**:
+the delete is for everyone, so a sender cannot take back a message without removing
+it for the peer as well. `test_deleting_announces_it_to_every_participant` pins
+that behaviour rather than leaving it implied. Each is a one-clause change if you
+want it.
+
+## 98. The authentication sweep was skipping item 97's endpoint in silence
+
+Item 97 added `POST /api/v1/messages/<int:message_id>/delete`. Nothing in this
+suite ever asked that URL anonymously. Not the endpoint's own eight tests, which
+send it authenticated; not the auth sweep, which is the one file whose entire job
+is to request every endpoint without a session.
+
+**The root cause is a hardcoded tuple and a bare `continue`.**
+`core/_tests/test_api_auth_surface.py` walks the URLconf and sweeps every DRF
+route under `api/`, but only if the route's path converters are all in
+
+    CONVERTERS = ('room_id', 'user_id', 'friendship_request_id', 'message_id')
+
+and the filter is
+
+    if '<' in pattern and not any('<int:%s>' % c in pattern for c in CONVERTERS):
+        dropped.append((pattern, 'not a path converter'))
+        continue
+
+`message_id` was the first converter in this URLconf that the tuple did not name,
+so item 97's route -- the one the previous entry had just added -- was dropped
+with no record. The file's own guard against exactly this,
+`test_the_routes_the_sweep_skips_are_the_django_ones`, says it exists "so it
+cannot leak", and it cannot see this: it counts routes that have **no**
+`permission_classes`, so a DRF route being *skipped* is invisible to it, exactly
+as a DRF route being *swept* is. The 24 URLs the sweep did request were all
+checked; the 25th was simply not in the list.
+
+**This is an audit gap, not a live hole, and that was measured before it was
+called one.** `settings.py:208-216` sets
+
+    REST_FRAMEWORK = {... 'DEFAULT_PERMISSION_CLASSES': ('rest_framework.permissions.IsAuthenticated',)}
+
+and no view in the app declares its own `permission_classes` -- `grep` returns
+nothing. So the delete endpoint is protected by the same default as the other 27
+DRF routes, and an anonymous POST to it answers 403. The consequence of the bug
+was that the *guarantee* was one route short of what it read as, not that anyone
+could reach a message they do not own. Which is the more expensive kind of bug
+to find later: the file says it checks everything, so nobody re-checks it.
+
+**The fix is to make the skip loud, and the write-down is the part that
+matters.** `_endpoints()` now returns `(urls, dropped)` instead of only the
+list, and the file carries the drop set explicitly:
+
+    EXPECTED_UNSWEPT_DRF_ROUTES = {
+        ('api/v1/<drf_format_suffix:format>', 'not a path converter'),
+        ('api/v1/^messages\\.(?P<format>[a-z0-9]+)/?$', 'router regex'),
+        ('api/v1/^rooms\\.(?P<format>[a-z0-9]+)/?$', 'router regex'),
+    }
+
+with `test_no_drf_route_falls_out_of_the_sweep_in_silence` asserting
+`set(dropped) == EXPECTED_UNSWEPT_DRF_ROUTES`. A new route that lands outside
+the sweep's filters is now red on arrival, and each of the three entries is a
+decision somebody wrote down rather than a fact the file discovered. The
+third is a small honesty worth stating: the router registers **no detail route
+at all** here. Walking the resolver gives 30 routes under `api/` -- 28 DRF plus
+`login/` and `logout/` -- and the four the router contributes are `^messages/$`,
+`^rooms/$` and their two format suffixes. There is no `^messages/(?P<pk>...)/$`
+to ask about, so there is nothing to write down; if one is ever registered it
+contains `(?P<`, it lands in `dropped`, and the assertion then demands a
+decision instead of skipping it quietly.
+
+**One test for the cheap escape.** Adding `message_id` to `CONVERTERS` and
+writing the route down in `EXPECTED_UNSWEPT_DRF_ROUTES` would satisfy the drop
+set and the django-views counter together and leave the endpoint unaudited with
+every test in the file green. That is the one shape of this failure the drop-set
+assertion cannot see, so membership is stated on its own:
+`test_the_message_delete_route_is_among_the_urls_the_sweep_requests` asserts
+`'/api/v1/messages/1/delete' in endpoints`.
+
+**Measured, not assumed: 25 endpoints swept, up from 24, and 4 silent drops
+become 3 declared ones.** Removing `message_id` from the tuple puts the route
+back in `dropped` and takes the count to 24 and the drops to 4 -- which is what
+makes the 4-versus-3 the size of the hole, rather than a number asserted here.
+
+**Five reversions, five killed by the test aimed at them.** `message_id` dropped
+from `CONVERTERS` -> `test_the_message_delete_route_is_among_the_urls_the_sweep_requests`;
+the `(?P<` branch no longer recording -> `test_no_drf_route_falls_out_of_the_sweep_in_silence`;
+the unknown-converter branch no longer recording -> the same; the reason string
+drifting in the constant -> the same; the append site stopping recording a reason
+at all -> the same. The fourth reversal did not run at first: its anchor
+`'router regex'` matched three places, and a count greater than one means **NOT
+APPLIED**, never a kill. Re-anchored, it was applied and killed.
+
+**pytest 269 -> 271.** No application code changed; the only edit to a
+non-test file in the whole entry is a stale `101` in one docstring, corrected to
+the `102` routes the resolver now walks, which item 97 had made a count too low
+by one.
+
+### What coverage said, and the reading trap in it
+
+Re-measuring coverage after item 97 was what found all of the above, so the
+measurement is worth recording including the part that turned out to be nothing.
+**99%, 22 missed** (it was 98%/46 before item 97, which added
+`chat/_tests/test_message_delete.py` and the client spec's server-visible half).
+Every missed line in application code is already accounted for: `__str__` on
+`chat/models.py`, the dead Follow/Block axis in `friends/models.py`, and the
+dead vendored `friends/api/test.py`.
+
+**Five of the 22 are inside test files, and all five are the lines a test runs
+only when it is failing.** `test_socket_path.py:83` is `comm.future.result()`,
+the call that re-raises the connection error; `86-87` are the `except
+ValueError` -> `pytest.fail` branch. `test_entry_point.py:131` is
+`found.append(...)` in the scan that currently finds nothing. And
+`test_api_auth_surface.py:146` -- line 5 of this entry's own new test -- is
+`reachable.append(...)`, the body of the assertion the sweep passes because
+nothing is appended. Coverage marks every one of them `Miss`, and the correct
+reading is the **opposite** of untested: they are what a passing test is made
+of. A reader going down the report would file all four as gaps, and the fix
+would be to write tests that execute a failure path deliberately, which is how
+you get a suite that passes for the wrong reason. So they are recorded here as a
+property of the report rather than chased. The one exception is worth stating,
+because it is the shape that hides: `test_entry_point.py:131` is not a failure
+path at all, it is a line in a helper that has never had anything to find, so
+if the bundle ever *does* contain a hardcoded `localhost` WebSocket, that line
+staying at 0 is the suite telling you the check works -- but only after a
+failure, never before.
+
+## 99. The frontend has no line-coverage signal, and a component that reads 100% was hiding it
+
+Item 98 ended with a measurement gap in plain sight: pytest was at 99% coverage
+and **the entire JavaScript side had no coverage number at all**. 273 tests,
+reversed by hand, but never measured. The obstacle, as recorded here, was that
+no node coverage reporter was installed.
+
+**The obstacle was wrong, and it took one command to find that out.**
+`npx vue-cli-service test:unit --coverage` works today. `babel-plugin-istanbul`,
+`istanbul-lib-instrument`, `istanbul-reports` and `istanbul-lib-coverage` are
+all already in `node_modules`, pulled in transitively by
+`@vue/cli-plugin-unit-jest`. Adding `--coverage` to `test:unit` would have needed
+no new dependency at all, which makes the gap not a tooling limitation but a
+missing line in a script.
+
+**The number, and I recomputed it rather than repeating the tool's.** 93.01%
+statements, 75% branch, 85.27% functions, 92.88% lines, across 27 files.
+Weighted by hand from `coverage-final.json` those come out at exactly
+93.01 / 75.00 / 85.27, so the `All files` row is honest. And it is also the
+first of two things this measurement got wrong for a reader.
+
+### Every component is at 100%, and the 100% is 2 to 8 lines
+
+Reading down the table, 22 `.vue` files all report `100 | 100 | 100 | 100`.
+Counting what is actually instrumented in each:
+
+| file | statements | functions | branches |
+| --- | --- | --- | --- |
+| `App.vue` | 3 | 0 | 0 |
+| `Home.vue` | 8 | 0 | 0 |
+| `Invitations.vue` | 3 | 0 | 0 |
+| `SentMessage.vue` | 2 | 0 | 0 |
+| `InviteFriend.vue` | 2 | 0 | 0 |
+
+**21 of the 22 have zero instrumented branches**, so the `100` in the branch
+column is a division by zero reported as perfect, and `App.vue` -- where items
+1 to 4's entire websocket work lives -- is three statements of
+`<script>`. The templates are not in the model at all: vue-jest compiles a
+single-file component's template into a *generated* render function, and
+`babel-plugin-istanbul` does not instrument generated code. `InviteButton.vue`
+is absent from the report whether or not it is rendered, for the same reason
+one step further on -- it has no `<script>` block, so it has zero instrumentable
+statements and no line-coverage report could ever mention it.
+
+So the honest reading of this table is: **every event binding, every `v-if`, and
+every `v-for` in this frontend is unmeasured.** That is not a defect in the
+suite, it is a property of the toolchain, and it is also the whole reason 273
+tests carry their weight by reversal instead of by coverage -- which is the
+arrangement the earlier entries built deliberately, and which this measurement
+confirms was necessary rather than merely cautious.
+
+### What it exposed: a component that reads 100% and hides a re-emit
+
+`InviteFriend.vue` has reported 100% since before this entry. It is **2
+statements**, and the third line of its template is the one thing the file does:
+
+    <invite-button @action="$emit('invite-action')" class="mt-5" />
+
+`InviteButton` emits `action`, `InviteFriend` turns it into `invite-action`, and
+`Invitations.vue:74,78,99` and `UsersSection.vue:65` are the listeners. **No spec
+rendered that chain.** The one spec that mounts a live parent stubs it out
+(`invitations_refusal.spec.js`, `stubs: { "invite-friend": true }`, with a
+stated reason: the child brings its own store reads and vue-feather imports),
+which is the right call for what that spec is about. Break the re-emit and the
+button still renders, still looks correct, and every number in the table stays
+green. The user gets a button that does nothing.
+
+**And something in this repo had already ruled on it, wrongly.**
+`window_size.spec.js:9-10` reads: *"the rest of the unmounted components
+(`SuccessAlert`, `InviteFriend`) are one prop and a slot with no logic between
+them."* That was true of `InviteFriend` and stopped being true when the re-emit
+was added. A comment asserting that a component carries no logic is a claim
+about code that can change underneath it, and nothing was checking. The reason
+it went unnoticed for so long is the finding above: `InviteFriend.vue` cannot
+report the change, because the change is in its template and templates are not
+measured. Both halves of that are now recorded in the two specs.
+
+`invite_button_chain.spec.js` mounts both components and pins five things: the
+button's text, that clicking it emits `action`, that `InviteFriend` re-emits as
+`invite-action`, that the child actually rendered (a stubbed child still
+receives the parent's emit, so this is what stops the chain test passing for the
+wrong reason), and that the slot still passes through.
+
+**Six reversions, six killed by the test aimed at them.** The re-emit bound to
+a no-op; the event renamed; `InviteButton`'s emit removed; the button text
+changed; the child replaced by a `<span>`; the slot removed. Two of them killed
+a second test as well, correctly -- breaking the child's emit breaks the
+wrapper's chain too, which is the coupling the wiring is made of.
+
+### What the two files with real code are missing
+
+Only two files in the table have code in them at all, and they are where the
+measurement does say something useful.
+
+**`actions.js`: 19 uncovered lines, 19 uncalled functions, 0 uncovered
+branches. All 19 lines are the same line** -- `.catch(error => reject(error))`,
+once per action. So not one of the store's 19 rejection paths has ever run.
+That is a real gap and it is the obvious next thread, but it is nineteen tests
+rather than one defect, so it is recorded here and not chased: a single
+`reject`-path test would pass for nineteen actions and pin one of them.
+
+**`mutations.js`: 100% statements, 72.22% branch, and all 10 missing branch arms
+are the defensive guards** -- `if (rooms)`, `if (messages)`, `if
+(sentInvitations)`, and the `|| []` fallbacks. One of those is the fix for a
+crash: `REMOVE_FAILED_MESSAGE`'s `state.roomMessages[room] || []` at line 157
+is what `mutations.js:141-143` records as repairing a TypeError on the first
+open of every new chat, and its fallback arm is one of the ten that has never
+run.
+
+**jest 268 -> 273 across 45 suites. pytest 271, untouched** -- no Python file
+changed in this entry. No source file changed either, so there is nothing to
+rebuild; `The build` does not apply to two spec files and a comment.
+
+**Three limits, recorded rather than glossed.** `--coverage` is still a manual
+flag rather than a script or a CI step, so the number has to be asked for. The
+93% is coverage of the **27 files jest imports**, not of `src/**`: of 36 source
+files, 5 are excluded by the harness itself (`main.js`, `router/index.js`,
+`store/store.js`, `backend/index.js`, `backend/csrf_token.js`), 3 are dead
+(`Example.vue`, `About.vue`, and `store/getters.js`, which is an empty object),
+and 1 is the uninstrumentable `InviteButton.vue`. And the largest limit is the
+one this entry is about: for a `.vue` there is no line-coverage signal to have,
+so this number cannot be improved by writing more tests against components, and
+a rising figure would be as meaningless as this one is. The store is the only
+place on this side where the number carries information.
+
+## 100. Nineteen untested copies of one line, and the line was load-bearing
+
+Item 99 left the other of its two measurements on the table: `actions.js` has
+**19 uncalled functions and 0 uncovered branches**, and all 19 are the same
+line --
+
+    .catch(error => reject(error));
+
+-- once per action. It also said why that is not nineteen tests' worth of work,
+and named the reason that turned out to be the whole entry.
+
+**The reading that was wrong, and it was the obvious one.** Nineteen hand-repeated
+`new Promise((resolve, reject) => { ... })` wrappers are 150 lines of boilerplate
+around code that does not need them, and this file already contains the correct
+spelling next to a comment saying so. `actions.js:76-79`, above `searchMessages`:
+
+> No `new Promise` wrapper, unlike every action above it: returning the axios
+> promise gives the caller the same thing to await and the same rejection to
+> catch, and the wrapper only ever forwarded both.
+
+That is right, and nineteen actions ignore it. Deleting the wrappers looked like
+the lazy fix -- rung 2, use the pattern already in the file -- and it would have
+removed all 19 uncovered lines in one stroke. **It would also have removed the
+error handling**, because the forwarding is not decorative:
+
+    return new Promise((resolve, reject) => {
+      axios.get(url).then(r => { ...; resolve(r); }).catch(error => reject(error));
+    });
+
+Take the `.catch` off that inner chain and `reject` has no caller. The promise
+the caller awaits is not rejected -- it **never settles**. A 500 on
+`fetchRooms` would leave `App.vue`'s `Promise.all` of seven load fetches waiting
+on one promise that is pending for the rest of the session: no error, no
+`catch` ever reached, a spinner that never stops. The comment is right that the
+wrapper forwards, and it is precisely the forwarding that stands between a
+refused request and a hung caller. This is the one place the ladder has to stop:
+"delete the boilerplate" was a simplification that removed the thing preventing a
+hung UI, which the brief puts off limits.
+
+**So the property to pin is the one that makes the line worth having.** A
+refused request rejects the action, and does not hang it. Three tests in
+`action_contracts.spec.js`, which was already the right home: its header says
+these actions' *fulfilled* paths had never run, which is exactly why their
+rejected ones had not either.
+
+**The list is not written down -- it is `Object.keys(actions)`.** Only `syncDB`
+is excluded, because it makes no request at all: it commits what it is handed, so
+there is nothing to refuse. That means an action added later without a `.catch`
+is red on arrival, for the same reason item 98's is: the guarantee is the shape
+of the test, not a list somebody maintains.
+
+**Both ways the line can break fail differently, and measuring that changed the
+test.** The first version of the helper was going to describe a race against a
+0ms timer as what catches a missing `.catch`. Reversions say otherwise, and the
+two shapes are different enough to be worth recording:
+
+- **`.catch` deleted outright.** The inner chain's rejection is now *unhandled*,
+  so jest24 reports the unhandled rejection by name and the test fails that way.
+  The race is never reached.
+- **`.catch` swallowing instead** (`.catch(() => {})`). Nothing settles and
+  nothing rejects, so there is no unhandled rejection to report, and a plain
+  `await` would sit there for jest's full 5s timeout naming nothing. The timer
+  is what catches this one, and the message is the action's own name --
+  `"fetchRooms -> hung"`.
+
+The timer is two lines and it earns them on the second shape alone.
+
+**Six reversions, six killed by the test aimed at them.** Three actions losing
+their `.catch` (`fetchRooms`, `markMessageAsRead`, `postWriting`) -> the loop;
+`sendMessage` not taking its optimistic bubble back -> the ordering test;
+`sendMessage` resolving instead of rejecting -> the loop; `fetchRooms`
+substituting the error for a summary of it -> both the loop and the identity
+test. The last one is why the third test exists: the loop only checks that
+*something* rejected, so replacing the error with `new Error("failed")` would
+satisfy it -- and `MessagesSection` and `SentMessage` both read
+`error.response`, so that mutation is every error in the app losing the field
+that tells a 404 from a 500.
+
+**Two harness faults, mine, recorded because they nearly became findings.** The
+first sweep counted occurrences of the *target* line (21) instead of the *marker*
+and therefore reported NOT APPLIED three times; worse, one entry left its
+replace-at-index at zero, which truncated `actions.js` and produced a
+**14-test failure that looked like a kill and was nothing of the kind**. The
+second driver counted the marker, verified the patch parses with eslint before
+running, and refused any patch that changed the file length by more than 400
+bytes. A truncated file fails all fourteen tests; that is the shape a false kill
+takes.
+
+**Coverage, which is the only reason this entry exists: `actions.js` 83.62%
+statements and 79.12% functions -> 100% and 100%. Zero uncalled functions, zero
+uncovered statements.** The whole frontend is now 100% statements, 100%
+functions and 100% lines, up from 93.01 / 85.27 / 92.88, and **75% branch is the
+only number left that is not 100** -- which is item 99's other thread, all ten
+arms in `mutations.js`, all of them the defensive guards.
+
+**jest 273 -> 276 across 45 suites. pytest 271, untouched.** One file changed,
+`tests/unit/action_contracts.spec.js`, and it is a test, so `The build` does not
+apply. `mockPatch` was also corrected to resolve `{data: {id: 1}}` rather than
+`{}`, so the same success value cannot satisfy both halves of the profile test.
+
 ## Proposed next, and what was measured
 
 Asked for as "Phase 2 enhancements", which is the name of the section items
@@ -6404,10 +7149,23 @@ already does elsewhere in the file. The filed cost was that the inner `:key` is
 load-bearing for items 71-73; item 77's reversions say it is not, and says why in
 three measured lines.
 
-**3. Dark mode** - your call, and I am not proposing the work. It is CSS over
-every component, and this Tailwind build is purged, so a dark palette means
-touching every template's classes rather than adding a sheet. Declined here as
-decoration until someone asks for it twice.
+**3. Dark mode** - **declined on a technical basis rather than on taste**, and the
+reason was measured in `package.json` and `tailwind.config.js` before being written
+here. `dark:` variants arrived in **Tailwind 1.7** and `darkMode: 'class'` in
+**2.0**; this project is on **1.1.4**. So a dark palette here is not a stylesheet,
+it is a Tailwind **major-version migration** followed by a class sweep across every
+template, and the purge would have to keep both palettes' variants. The earlier
+note in this list - "CSS over every component, and this Tailwind build is purged" -
+had the shape of the objection right and its mechanism wrong, and item 97 turned up
+a live demonstration of the failure mode: `group-hover:opacity-100` is a class this
+build cannot generate, it passes every test in the repo, and it was invisible until
+the artefact was grepped. The migration is worth doing if you want it; it is not a
+stylesheet change and should not be filed as one.
+
+**4. Deleting one message from a chat** - **done**, item 97. Found the way the
+endpoint-with-no-caller survey was: not by looking for a dangling endpoint, which
+by item 3 there were none of, but for a capability the app has *next door* and not
+here. The app could delete a whole conversation and not one message from it.
 
 **Not proposed: a second source of truth for the sidebar.** The rooms list is the
 friend list (`RoomSerializer`'s `group_profile` is what the sidebar renders), so
@@ -6570,6 +7328,60 @@ One hundred and twenty-one reversions of the code they pin each fail the intende
 rather than a parse error. `/* eslint-env jest */` sits in each file: an `overrides` block in
 `.eslintrc.js` would be tidier, and the config-protection hook rightly blocks
 weakening it.
+
+Item 97 adds **18** reversions over the message-delete client code, and one of
+them is an exception to that sentence worth having on the record: **17 fail the
+test they were aimed at, and the eighteenth kills the Node runner instead** - the
+`.catch` taken off a Vue click handler, where jest prints `Error: 404 ... at
+invokeWithErrorHandling ... at processTicksAndRejections` and never prints a
+`Tests:` summary at all. The exception is in the safe direction, which is not
+nothing: a missing error path here is louder, not quieter. The sweep counts that
+one as killed rather than reporting it as a harness fault, and the harness is
+explicit that "the suite did not start" is a symptom with a dozen causes - it
+prints the output instead of summarising it.
+
+Item 98 adds **5** reversions over `test_api_auth_surface.py`, and all five fail
+the test they were aimed at, which is what makes them worth having: the file
+under edit is a *test*, so a reversion of it is a reversion of the guarantee
+rather than of the code behind it. Two of the five are there for that reason
+alone. Making `_endpoints()` stop recording what it drops, and drifting a reason
+string, both fail `test_no_drf_route_falls_out_of_the_sweep_in_silence` and
+nothing else; dropping `message_id` from `CONVERTERS` fails the membership test,
+which is the one that keeps the honest spelling of the fix (add the converter)
+from being replaced by the cheap one (write the route down as unswept). The
+sixth reversal attempted did not run - its anchor occurred three times, and a
+count above one is **NOT APPLIED**, never a kill - so it was re-anchored and
+then killed. The count of total reversions in this project is left alone: it was
+never verified exhaustively, and restating a number that was never measured
+would be worse than not restating it.
+
+Item 99 adds **6** reversions over the invite-button chain, all six killed by
+the test they were aimed at. It also closes a hole in the sentence above that
+nobody had noticed was a hole: rendering is covered only where it carries logic,
+and "logic" in a `.vue` is exactly what coverage cannot see, because a template
+is compiled to generated code that `babel-plugin-istanbul` does not instrument.
+`InviteFriend.vue` reported **100%** on **2 instrumented statements** for as long
+as anyone was looking, and the re-emit that makes it a component rather than a
+`<div>` was one of the lines the number was computed without. That is the same
+sentence made concrete rather than a new one: the reversal sweep is currently
+the *only* thing in this project that would catch a broken event binding in a
+template, and 273 tests and a green coverage table would not.
+
+Item 100 adds **6** reversions, all six killed by the test they were aimed at,
+and it closes the other of item 99's two measurements: the 19 uncalled functions
+in `actions.js` are gone and the frontend is now 100% statements, functions and
+lines. The parts of it worth carrying forward are the two that are not about the
+code. A truncated `actions.js` fails all fourteen tests in the spec that
+reverses it, which is what a false kill looks like in this harness -- the driver
+now eslint-checks a patch and refuses one that moves the file length by more than
+400 bytes before it is allowed to run a test against it. And the comment the
+reversions overturned was about the *test*: `action_contracts.spec.js`'s 0ms
+timer was written to describe catching a missing `.catch`, and measurement says
+a missing `.catch` leaves an unhandled rejection that jest reports by name, so
+the timer catches the other shape instead -- a `.catch` that swallows, settling
+nothing. Both are on the record because a comment asserting a mechanism it has
+never watched fail is the exact failure item 99 found in `window_size.spec.js`,
+and this entry wrote one and then caught it.
 
 Still open: rendering is only covered where it carries logic. Backend contracts
 reached *through* the frontend are pinned by hand on the Django side, in

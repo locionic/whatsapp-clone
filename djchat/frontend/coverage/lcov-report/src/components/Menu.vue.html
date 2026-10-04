@@ -131,7 +131,33 @@
 <a name='L73'></a><a href='#L73'>73</a>
 <a name='L74'></a><a href='#L74'>74</a>
 <a name='L75'></a><a href='#L75'>75</a>
-<a name='L76'></a><a href='#L76'>76</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -150,7 +176,33 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -208,12 +260,28 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">&lt;template&gt;
   &lt;div class="menu"&gt;
+    &lt;!-- Hover was the only way in, and this holds the only Logout in the app.
+         `focusin` is what makes it a control rather than a hover target: the
+         dropdown is `v-if`'d, so while it is closed the Logout link is not in
+         the DOM to be tabbed to, and nothing that does not need a pointer can
+         open it. On a touch device - where UsersSection:25 renders this as the
+         *only* logout - a hover is not a gesture anyone has. --&gt;
     &lt;div
-      class="cursor-pointer mr-3 dropdown"
+      class="mr-3 dropdown"
       @mouseover="showContext = true"
       @mouseleave="showContext = false"
+      @focusin="showContext = true"
+      @focusout="onFocusOut"
+      @keydown.esc="showContext = false"
     &gt;
-      &lt;i class="material-icons text-2xl mx-1 dropbtn"&gt;more_vert&lt;/i&gt;
+      &lt;button
+        class="cursor-pointer dropbtn"
+        aria-label="Account menu"
+        aria-haspopup="true"
+        :aria-expanded="showContext ? 'true' : 'false'"
+      &gt;
+        &lt;i class="material-icons text-2xl mx-1"&gt;more_vert&lt;/i&gt;
+      &lt;/button&gt;
       &lt;transition name="fade"&gt;
         &lt;div class="dropdown-content rounded-lg" v-if="showContext"&gt;
           &lt;a href="/accounts/logout/" class="flex rounded-lg"&gt;
@@ -232,6 +300,17 @@ export default {
     return {
       showContext: false
     };
+  },
+  methods: {
+    // `focusout` fires for the button too, so closing on it would snap the menu
+    // shut the moment you tab from the trigger onto the only link it contains -
+    // a keyboard path that dies one step in. Close when focus leaves the menu,
+    // not when it moves within it.
+    onFocusOut(event) {
+      if (!this.$el.contains(event.relatedTarget)) {
+        this.showContext = false;
+      }
+    }
   }
 };
 &lt;/script&gt;
@@ -280,15 +359,14 @@ export default {
 .dropdown-content a:hover {
   background-color: #b2f5ea;
 }
-&lt;/style&gt;
-&nbsp;</pre></td></tr></table></pre>
+&lt;/style&gt;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
             </div><!-- /wrapper -->
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank">istanbul</a>
-                at Sat Oct 03 2026 06:10:07 GMT+0000 (Coordinated Universal Time)
+                at Sun Oct 04 2026 16:04:40 GMT+0000 (Coordinated Universal Time)
             </div>
         </div>
         <script src="../../prettify.js"></script>

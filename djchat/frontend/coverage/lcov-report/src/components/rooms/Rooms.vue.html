@@ -3,7 +3,7 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for src/components/profiles/SuccessAlert.vue</title>
+    <title>Code coverage report for src/components/rooms/Rooms.vue</title>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="../../../prettify.css" />
     <link rel="stylesheet" href="../../../base.css" />
@@ -18,13 +18,13 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/components/profiles</a> SuccessAlert.vue</h1>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/components/rooms</a> Rooms.vue</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>1/1</span>
+                <span class='fraction'>4/4</span>
             </div>
         
             
@@ -45,7 +45,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>1/1</span>
+                <span class='fraction'>4/4</span>
             </div>
         
             
@@ -110,17 +110,10 @@
 <a name='L52'></a><a href='#L52'>52</a>
 <a name='L53'></a><a href='#L53'>53</a>
 <a name='L54'></a><a href='#L54'>54</a>
-<a name='L55'></a><a href='#L55'>55</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -155,6 +148,19 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -165,56 +171,59 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">&lt;template&gt;
-  &lt;div class="success-alert"&gt;
+  &lt;div class="rooms"&gt;
     &lt;div
-      class="rounded-b px-4 py-3 shadow-md border-t-4"
-      :class="
-        error
-          ? 'bg-red-100 border-red-500 text-red-900'
-          : 'bg-teal-100 border-teal-500 text-teal-900'
-      "
-      role="alert"
+      class="relative flex flex-col justify-between border-l bg-white h-screen"
     &gt;
-      &lt;div class="flex"&gt;
-        &lt;div class="py-1"&gt;
-          &lt;svg
-            class="fill-current h-6 w-6 mr-4"
-            :class="error ? 'text-red-500' : 'text-teal-500'"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-          &gt;
-            &lt;path
-              d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zm12.73-1.41A8 8 0 1 0 4.34 4.34a8 8 0 0 0 11.32 11.32zM9 11V9h2v6H9v-4zm0-6h2v2H9V5z"
-            /&gt;
-          &lt;/svg&gt;
-        &lt;/div&gt;
-        &lt;div&gt;
-          &lt;p class="font-bold"&gt;Profile Update&lt;/p&gt;
-          &lt;p class="text-sm"&gt;
-            {{
-              error
-                ? "Your profile was not saved. Try again."
-                : "Profile changes have been successfully updated."
-            }}
-          &lt;/p&gt;
-        &lt;/div&gt;
+      &lt;!-- Right sidenav --&gt;
+      &lt;contact-profile
+        :rightSidenav="rightSidenav"
+        @toggleRightSidenav="$emit('toggleRightSidenav')"
+      /&gt;
+&nbsp;
+      &lt;!-- Seccion de mensajes --&gt;
+      &lt;messages-section @profile-sidenav="$emit('toggleRightSidenav')"&gt;
+        &lt;slot /&gt;
+      &lt;/messages-section&gt;
+&nbsp;
+      &lt;!-- Envio de mensaje --&gt;
+      &lt;div class="relative"&gt;
+        &lt;p v-if="whosWriting" class="absolute left-0 text-xs ml-3"&gt;
+          {{ whosWriting }} is writing...
+        &lt;/p&gt;
+        &lt;send-form class="mt-5 mx-5" /&gt;
       &lt;/div&gt;
+&nbsp;
+      &lt;!-- Footer Copyright --&gt;
+      &lt;!-- &lt;div class="text-right mr-5"&gt;
+        &lt;a style="font-size: 9px;" href="http://www.freepik.com"
+          &gt;Background vector created by kjpargeter - www.freepik.com&lt;/a
+        &gt;
+      &lt;/div&gt; --&gt;
     &lt;/div&gt;
   &lt;/div&gt;
 &lt;/template&gt;
 &nbsp;
 &lt;script&gt;
-// One flag, not two components: the banner is the same shape either way and it
-// is only ever shown by UserProfile. It is also the only place a failed save
-// could have been reported at all -- the save used to be caught and logged, so
-// a rejected patch said nothing and the user believed their bio was stored.
+import ContactProfile from "@/components/profiles/ContactProfile.vue";
+import SendForm from "@/components/SendForm.vue";
+import MessagesSection from "@/components/messages/MessagesSection.vue";
+&nbsp;
 export default {
-  name: "SuccessAlert",
   props: {
-    error: {
+    rightSidenav: {
       type: Boolean,
-      default: false
+      required: true
+    },
+    whosWriting: {
+      type: String,
+      required: true
     }
+  },
+  components: {
+    MessagesSection,
+    SendForm,
+    ContactProfile
   }
 };
 &lt;/script&gt;

@@ -107,11 +107,16 @@ const inRoomList = (fields, state = {}) =>
     }
   });
 
-// Both components render exactly three `.material-icons` - the clock, the double
-// tick and the single tick - and nothing else, so this is the receipt row and not
-// a wider selector. Counted, not assumed: `grep -c material-icons` is 3 in each.
+// Both components render exactly three `<i class="material-icons">` - the clock,
+// the double tick and the single tick - so this is the receipt row and not a
+// wider selector. Counted, not assumed: `grep -c material-icons` is 3 in each.
+// **Tag-qualified since item 97**, which put a fourth `material-icons` in the
+// sent bubble: the delete control borrows the same icon font, and it is a
+// `button`, so this still selects the three receipts and nothing else. Narrowing
+// rather than loosening - a receipt changed to a `<span>` now fails this where it
+// would have passed on the bare class.
 const icons = wrapper =>
-  wrapper.findAll(".material-icons").wrappers.map(one => one.text());
+  wrapper.findAll("i.material-icons").wrappers.map(one => one.text());
 
 const SITES = [
   ["the sent message in a chat", inChat],
@@ -143,12 +148,12 @@ test.each(SITES)("%s: only a read message goes teal", (_name, mountAt) => {
   // Two assertions, because the class is on the double tick and a `done_all`
   // that never goes teal is a different bug from one that is always teal.
   const received = mountAt({ all_received: true });
-  expect(received.find(".material-icons").classes()).not.toContain(
+  expect(received.find("i.material-icons").classes()).not.toContain(
     "text-teal-400"
   );
 
   const read = mountAt({ all_received: true, all_read: true });
-  expect(read.find(".material-icons").classes()).toContain("text-teal-400");
+  expect(read.find("i.material-icons").classes()).toContain("text-teal-400");
 });
 
 test.each(SITES)(
@@ -168,7 +173,7 @@ test.each(SITES)(
       { all_received: false },
       { allReceived: { 7: true }, allRead: { 7: true } }
     );
-    expect(read.find(".material-icons").classes()).toContain("text-teal-400");
+    expect(read.find("i.material-icons").classes()).toContain("text-teal-400");
   }
 );
 

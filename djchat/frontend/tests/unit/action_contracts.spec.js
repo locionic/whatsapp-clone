@@ -40,6 +40,15 @@
  * had no test at all -- deleting it left a group you created invisible to
  * everyone else with no error anywhere. `push_handlers.spec.js` pins it now; read
  * that file as part of this one rather than as an extra.
+ *
+ * **Item 100 added the other half of each action.** Everything above runs an
+ * action on the path where the request succeeds, which is why a coverage run
+ * still reported 19 uncalled functions in `actions.js` -- the 19 rejection
+ * paths, all of them the same line. The last three tests here cover them, and
+ * the section comment there says why the line is not simply the boilerplate it
+ * looks like. The header above still says fifteen; that count is the actions
+ * that had *never* been run at all, which was the state this file was written
+ * against and is now historical in the same way.
  */
 import actions from "@/store/actions.js";
 
@@ -47,7 +56,7 @@ const mockGet = jest.fn(() =>
   Promise.resolve({ data: { messages: [], users: [], room: {} } })
 );
 const mockPost = jest.fn(() => Promise.resolve({ data: [] }));
-const mockPatch = jest.fn(() => Promise.resolve({ data: {} }));
+const mockPatch = jest.fn(() => Promise.resolve({ data: { id: 1 } }));
 
 jest.mock("@/backend", () => ({
   get: (...args) => mockGet(...args),
@@ -210,4 +219,122 @@ test("a group is created with kind 2, its name and its participants", async () =
   // The group reaches every participant's sidebar off the `update_rooms` push
   // the view sends, which `App.vue:48-49` answers with `fetchRooms`.
   expect(commits).not.toHaveBeenCalled();
+});
+
+// ------------------------------------------------------- the refusal, times 19
+
+// Item 99 measured the other half: every one of those fifteen fulfilled paths
+// runs, and **19 uncalled functions** are the *rejection* paths -- all of them
+// the same line, `.catch(error => reject(error))`, once per action. Nineteen
+// untested copies of one line is a bad thing to fix with nineteen tests, and it
+// is not a thing to fix by deleting the line either, which is what reading
+// `actions.js` invites first.
+//
+// **Why the line cannot just go.** A caller awaiting a wrapper whose inner
+// chain has no `.catch` is not rejected: `reject` is never called, so the
+// promise never settles. A 500 on `fetchRooms` would leave the caller awaiting
+// a promise pending for the rest of the session -- a spinner that never stops,
+// no error, no `catch` ever reached. `searchMessages` avoids the wrapper
+// entirely, and its comment at `actions.js:76-79` says the wrapper "only ever
+// forwarded both" -- true, and that forwarding is the only thing standing
+// between a refused request and a hung caller.
+//
+// So the property to pin is the one that makes the line worth having: **a
+// refused request rejects the action, and does not hang it.** Both halves, and
+// the second is the one a plain `rejects.toBe` assertion cannot reach.
+//
+// The list is not written out, it is `Object.keys(actions)`, so an action added
+// later without a `.catch` is red on arrival for the same reason the auth
+// sweep's was. Only `syncDB` is excluded, because it makes no request at all:
+// it is the one action that commits what it is handed, so there is nothing to
+// refuse.
+
+const refused = new Error("refused");
+
+const PAYLOAD = {
+  fetchPastMessages: { firstMessageId: 1, roomId: 7 },
+  searchMessages: { room: 7, term: "hi" },
+  sendMessage: { room: 7, body: "hi", front_key: "key-1" },
+  markMessageAsRead: 42,
+  markRoomAsRead: 7,
+  getUserIdFromEmail: "bob@example.com",
+  addFriend: 9,
+  cancelFriendRequest: 12,
+  rejectFriendRequest: 12,
+  acceptFriendRequest: 12,
+  deleteRoom: 7,
+  deleteMessage: 42,
+  fetchRoomActivity: 7,
+  createGroup: { group_name: "Trip", participants: [3] },
+  patchUserProfile: { tagline: "hi" }
+};
+
+const NO_REQUEST = ["syncDB"];
+
+// The timer is here for one failure shape, and both shapes were measured rather
+// than guessed. Deleting an action's `.catch` outright leaves the inner chain's
+// rejection **unhandled**, so jest24 reports it by name and the test fails that
+// way -- the race is never reached. Swallowing it instead (`.catch(() => {})`)
+// settles nothing and rejects nothing, so there is no unhandled rejection to
+// report and an `await` would sit there for jest's full 5s timeout naming
+// nothing at all. The 0ms timer is a macrotask and the mock's rejection is a
+// microtask, so a promise that does settle always wins, and the message is the
+// action's own name: `"fetchRooms -> hung"`.
+const settled = promise =>
+  Promise.race([
+    promise.then(
+      value => ({ outcome: "resolved", value }),
+      error => ({ outcome: "rejected", error })
+    ),
+    new Promise(resolve => setTimeout(() => resolve({ outcome: "hung" }), 0))
+  ]);
+
+test("every action that makes a request rejects when the request is refused", async () => {
+  mockGet.mockImplementation(() => Promise.reject(refused));
+  mockPost.mockImplementation(() => Promise.reject(refused));
+  mockPatch.mockImplementation(() => Promise.reject(refused));
+
+  const outcomes = [];
+  for (const name of Object.keys(actions)) {
+    if (NO_REQUEST.includes(name)) continue;
+    commits.mockClear();
+    const result = await settled(
+      actions[name]({ commit: commits, dispatch: jest.fn() }, PAYLOAD[name])
+    );
+    if (result.outcome === "rejected" && result.error === refused) continue;
+    outcomes.push(`${name} -> ${result.outcome}`);
+  }
+
+  expect(outcomes).toEqual([]);
+});
+
+test("a refused send takes its optimistic bubble back off before it rejects", async () => {
+  // The one rejection path that does store work before rejecting, and the only
+  // one of the twenty whose failure loses the user's text if it is skipped. The
+  // loop above is happy with a bare `reject`, so it would pass here with the
+  // commit removed; `failed_send.spec.js` owns the user-visible half and this
+  // owns the ordering, which is that the commit happens and *then* the
+  // rejection, because the caller that shows the error has no other way to know
+  // the message is gone.
+  mockPost.mockImplementation(() => Promise.reject(refused));
+
+  await settled(actions.sendMessage({ commit: commits }, PAYLOAD.sendMessage));
+
+  expect(commits.mock.calls[0]).toEqual([
+    "REMOVE_FAILED_MESSAGE",
+    { front_key: "key-1", room: 7 }
+  ]);
+});
+
+test("the refusal arrives as the same error, not a summary of one", async () => {
+  // What a component's `.catch` reads. `MessagesSection` and `SentMessage` both
+  // key off `error.response`, so a wrapper that replaced the error with, say,
+  // `new Error("failed")` would leave every error in the app showing a generic
+  // message with nothing to tell a 404 from a 500 -- and no test above would
+  // notice, because the loop only checks that *something* rejected.
+  mockGet.mockImplementation(() => Promise.reject(refused));
+
+  const result = await settled(actions.fetchRooms({ dispatch: jest.fn() }));
+
+  expect(result).toEqual({ outcome: "rejected", error: refused });
 });

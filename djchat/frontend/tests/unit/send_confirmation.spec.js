@@ -128,12 +128,14 @@ const mountChat = state =>
     }
   });
 
-// The sent bubble's own icons. Three `.material-icons` exist in the subtree and
-// only one component carries them, so the class is specific - same selector
-// `read_receipts.spec.js` and `receipt_reactivity.spec.js` use.
+// The sent bubble's own icons. Three `<i class="material-icons">` exist in the
+// subtree and only one component carries them, so the class is specific - same
+// selector `read_receipts.spec.js` and `receipt_reactivity.spec.js` use, and
+// tag-qualified for the reason given there: item 97's delete control is a fourth
+// `material-icons` and it is a `button`, not an `<i>`.
 const sentIcons = wrapper =>
   wrapper
-    .findAll(".sent-message .material-icons")
+    .findAll(".sent-message i.material-icons")
     .wrappers.map(one => one.text());
 
 beforeAll(() => {

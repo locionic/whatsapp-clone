@@ -71,9 +71,11 @@ const inChat = fields =>
   });
 
 // `read_receipts.spec.js`'s own selector, for the same reason: three
-// `.material-icons` in this component and nothing else carries the class.
+// `<i class="material-icons">` in this component, and since item 97 a fourth
+// `material-icons` that is a `button` - the delete control - which is why the
+// selector names the tag.
 const icons = wrapper =>
-  wrapper.findAll(".material-icons").wrappers.map(one => one.text());
+  wrapper.findAll("i.material-icons").wrappers.map(one => one.text());
 
 test("a received receipt changes the tick on screen", async () => {
   const wrapper = inChat({ all_received: false });
@@ -97,12 +99,12 @@ test("a read receipt changes the colour on screen", async () => {
   // is standing in for the other.
   const wrapper = inChat({ all_received: true });
   expect(icons(wrapper)).toEqual(["done_all"]);
-  expect(wrapper.find(".material-icons").classes()).not.toContain(
+  expect(wrapper.find("i.material-icons").classes()).not.toContain(
     "text-teal-400"
   );
 
   mutations.MARK_MESSAGE_ALL_READ(wrapper.vm.$store.state, 7);
   await wrapper.vm.$nextTick();
 
-  expect(wrapper.find(".material-icons").classes()).toContain("text-teal-400");
+  expect(wrapper.find("i.material-icons").classes()).toContain("text-teal-400");
 });

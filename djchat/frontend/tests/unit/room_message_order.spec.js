@@ -193,3 +193,31 @@ test("two messages typed before either is confirmed both stay", () => {
     "key-3"
   ]);
 });
+
+test("a message still in flight sorts below a page of history landing on it", () => {
+  // The other way an unconfirmed message meets `position`, and the one the
+  // guard above exists for. `Infinity` is what keeps an in-flight message at
+  // the bottom; drop the `undefined` arm and it is `undefined - 7` = NaN, and
+  // a comparator returning NaN leaves the array as it was -- so the message you
+  // are typing renders ABOVE the history you just scrolled up to read.
+  //
+  // Reachable because `SendForm` links the optimistic message before the server
+  // has answered, and `fetchPastMessages` merges into whatever is already in the
+  // room. Type a message and scroll up while it is still in flight.
+  const state = freshState();
+  link(state, [msg(9)]);
+  const pending = { room: 7, body: "typed", sending: true, front_key: "key-2" };
+  link(state, [pending]);
+  state.sendingPool.set(pending.front_key, pending);
+
+  linkPast(state, 7, [msg(7), msg(8)]);
+
+  expect(state.roomMessages[7].map(m => m.front_key)).toEqual([
+    "key-7",
+    "key-8",
+    "key-9",
+    "key-2"
+  ]);
+  // Still at the end, still unconfirmed: history moving it is the whole defect.
+  expect(state.roomMessages[7][3].id).toBeUndefined();
+});

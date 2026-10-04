@@ -186,3 +186,45 @@ class MessageViewSet(viewsets.ViewSet):
                     'data': {}
                 })
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class MessageDeleteAPIView(APIView):
+    """Delete a message you sent, for everyone in the room.
+
+    A POST to a `/delete` route rather than a `destroy` on the viewset, for
+    `RoomDeleteAPIView`'s reason and not only that one: `MessageViewSet` is a bare
+    `viewsets.ViewSet`, so `DELETE /api/v1/messages/<pk>/` would answer 405
+    Method Not Allowed on a path that plainly exists, which reads as a server bug
+    in a log rather than as an unimplemented feature.
+
+    **The filter carries both halves of the permission** -- a room you are in
+    *and* an author who is you -- so the refusal is a `get_object_or_404` rather
+    than a permission check that has to be written twice and kept in step. Two
+    situations end up as the same 404: a message somebody else wrote, and a
+    message in a room you were removed from. They must be indistinguishable from
+    the outside, and 404 is what the room delete already answers for the second.
+
+    Deliberately no `room.save()`. `Room.last_activity` is `auto_now`, so saving
+    would float a room to the top of the recents list for the deletion of a
+    message sent last month. The client's sidebar preview is refreshed by the
+    announce below instead, which re-reads `RoomSerializer.get_last_message`.
+    """
+
+    def post(self, request, message_id, format=None):
+        message = get_object_or_404(
+            Message.objects.filter(
+                room__participants=request.user,
+                author=request.user),
+            id=message_id)
+        # Announced before the delete, because afterwards the row is gone and
+        # `signal_to_room` needs it to address the room's participant groups.
+        #
+        # `message_id` alone, and it is worth saying why not more. The client
+        # clears `receivedMessages` and `sendingPool` by `front_key` and the three
+        # receipt maps by `message_id`, so a delete does touch both halves -- but
+        # the client already holds the message, front_key and id in one object, so
+        # it can read the key off the message it found rather than being told it.
+        # A bigger payload would be one more thing to keep in step for no gain.
+        message.signal_to_room('message_delete', data={'message_id': message.id})
+        message.delete()
+        return Response(None, status=status.HTTP_204_NO_CONTENT)

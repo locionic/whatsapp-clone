@@ -9,6 +9,20 @@
  * (`SuccessAlert`, `InviteFriend`) are one prop and a slot with no logic
  * between them.
  *
+ * **`InviteFriend` has since outgrown that sentence, and this entry is where
+ * it was found wrong.** `InviteFriend.vue:6` is now a re-emit -
+ * `<invite-button @action="$emit('invite-action')" />` - so it is a slot plus a
+ * wire, not a slot alone, and a break in it is a button that renders correctly
+ * and does nothing. `invite_button_chain.spec.js` mounts it and pins both
+ * halves. It is worth saying how the premise was allowed to expire unnoticed:
+ * `InviteFriend.vue` reports 100% covered. It has 2 instrumented statements,
+ * because a `.vue` template is not in the coverage model at all -- vue-jest
+ * compiles it to a generated render function that `babel-plugin-istanbul`
+ * never sees. So the file that grew logic nobody looked at was also the file
+ * that could not report having grown it. The reasoning here was sound and its
+ * premise was simply not checked. `SuccessAlert` was not re-examined, and this
+ * file does not now claim it has no logic.
+ *
  * What it feeds is not cosmetic. `Home.vue` gates the two panes on it -
  * `v-if="width < 768"` for the sidebar, `v-if="width >= 768"` for `<rooms>` -
  * so `state.width` decides whether the chat pane exists at all. Item 61's crash
@@ -73,7 +87,8 @@ test("the resize listener is the one added, and it goes when the component does"
   const removed = jest.spyOn(window, "removeEventListener");
   try {
     const { wrapper } = setup();
-    const handler = (added.mock.calls.find(call => call[0] === "resize") || [])[1];
+    const handler = (added.mock.calls.find(call => call[0] === "resize") ||
+      [])[1];
 
     expect(typeof handler).toBe("function");
 
