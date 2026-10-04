@@ -161,16 +161,17 @@ class FriendshipModelTests(BaseTestCase):
         self.assertEqual(Friend.objects.friends(self.user_amy), [])
         req3.reject()
 
-        # Duplicated requests raise a more specific subclass of IntegrityError.
-        with self.assertRaises(AlreadyExistsError):
-            Friend.objects.add_friend(self.user_susan, self.user_amy)
+        # Asking again after a rejection is allowed, and revives the row. This
+        # used to raise AlreadyExistsError, which pinned the pair to each other
+        # for good -- see friends/_tests/test_reinvite_after_reject.py.
+        revived = Friend.objects.add_friend(self.user_susan, self.user_amy)
+        self.assertEqual(revived.pk, req3.pk)
+        self.assertIsNone(revived.rejected)
 
         self.assertFalse(Friend.objects.are_friends(
             self.user_susan, self.user_amy))
         self.assertEqual(
-            len(Friend.objects.rejected_requests(self.user_amy)), 1)
-        self.assertEqual(
-            len(Friend.objects.rejected_requests(self.user_amy)), 1)
+            Friend.objects.rejected_requests(self.user_amy), [])
 
         # let's try that again..
         req3.delete()

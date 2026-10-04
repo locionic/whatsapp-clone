@@ -15,4 +15,6 @@ urlpatterns = [
     path('rooms/<int:room_id>/writing', roomViews.RoomWritingAPIView.as_view()),
     path('rooms/<int:room_id>/read', roomViews.RoomMarkAsReadAPIView.as_view()),
     path('rooms/<int:room_id>/delete', roomViews.RoomDeleteAPIView.as_view()),
+    path('rooms/<int:room_id>/export', roomViews.RoomExportAPIView.as_view()),
+    path('rooms/<int:room_id>/activity', roomViews.RoomActivityAPIView.as_view()),
 ] + router.urls

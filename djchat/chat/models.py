@@ -108,6 +108,27 @@ class Room(models.Model):
         verbose_name = "Sala"
         verbose_name_plural = "Salas"
 
+    @classmethod
+    def get_or_create_private(cls, user_a, user_b):
+        """ The one private room for these two people; created if absent.
+
+        Both callers share this so they cannot disagree: RoomViewSet.create
+        refused to duplicate, but the accept signal created unconditionally,
+        so removing a friend (which keeps the room) and re-inviting them
+        left the two of them with two separate chats.
+
+        Returns (room, created).
+        """
+        room = cls.objects \
+            .filter(kind=cls.RoomKind.PRIVATE, participants=user_a) \
+            .filter(participants=user_b) \
+            .first()
+        if room:
+            return room, False
+        room = cls.objects.create(kind=cls.RoomKind.PRIVATE)
+        room.participants.add(user_a, user_b)
+        return room, True
+
     def signal_to_room(self, message, data={}):
         for participant in self.participants.all():
             async_to_sync(channel_layer.group_send)(

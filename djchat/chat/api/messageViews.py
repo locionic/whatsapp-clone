@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import ParseError, PermissionDenied
 from rest_framework.views import APIView
 
 from channels.layers import get_channel_layer
@@ -23,19 +23,20 @@ class UnreadMessagesAPIView(APIView):
     """
     Endpoints related unread messages
     """
-    queryset = Message.objects.all()
+    # No `queryset`: this view reads request.user.unread_messages, and DRF
+    # derives an operationId's base name from queryset.model -- which made
+    # /messages/unread claim 'createMessage' and 'listMessages', already taken
+    # by the MessageViewSet routes.
+    serializer_class = UnreadMessageSerializer
 
     def get(self, request, format=None):
         """
         List unread messages for a specific user
         """
-        print('unreadddd')
         unread_messages_serializer = UnreadMessageSerializer(
             request.user.unread_messages.all(),
             context={'request': request},
             many=True)
-        print(unread_messages_serializer.data)
-        print('unreadddd done')
         return Response({
             'messages': unread_messages_serializer.data
         })
@@ -48,8 +49,10 @@ class UnreadMessagesAPIView(APIView):
             message_id = request.query_params.get('message_id')
             message_obj = request.user.unread_messages.get(id=message_id)
             message_obj.mark_as_read(request.user)
-        except:
-            # Simply avoid error msgs in this endpoint
+        except (Message.DoesNotExist, ValueError, TypeError):
+            # The message is not unread for this user, or message_id is
+            # absent/malformed. The endpoint is idempotent by contract, so
+            # still answer 204 -- but let real failures (DB down, etc.) raise.
             pass
         return Response(None, status=status.HTTP_204_NO_CONTENT)
 
@@ -71,13 +74,33 @@ class LastMessagesRoomAPIView(APIView):
             context={'request': request})
         # get messages
         offset = self.request.query_params.get('offset')
-        offset = int(offset) if offset else None
+        try:
+            offset = int(offset) if offset else None
+        except ValueError:
+            # int() on a raw query param: '?offset=abc' escaped as a 500 for
+            # anyone who could reach the room, on a read-only endpoint.
+            raise ParseError(detail='offset must be a message id.')
+        # `?search=` narrows the queryset and `?offset=` pages through it, so the
+        # two compose with nothing extra: filter first, then let the branch below
+        # decide which end of the result it is showing. An empty `?search=` is
+        # falsy, so it is the no-search path rather than "match the empty string".
+        #
+        # Server-side because the client cannot do it: a room opens with the
+        # newest ten (the `[:10]` below), so anything filtering
+        # `state.roomMessages` on the client would answer "no such message" for
+        # every message it never fetched. `icontains` and not `contains`:
+        # LIKE is case-sensitive on Postgres, and a search box is not
+        # case-sensitive to the person using it.
+        search = self.request.query_params.get('search')
+        messages_qs = room.messages
+        if search:
+            messages_qs = messages_qs.filter(body__icontains=search)
         if offset:
-            messages = room.messages    \
-                .filter(id__lt=offset)  \
+            messages = messages_qs   \
+                .filter(id__lt=offset) \
                 .order_by('-id')[:10][::-1]
         else:
-            messages = room.messages.order_by(
+            messages = messages_qs.order_by(
                 '-timestamp')[:10][::-1]
         messages_serializer = MessageSerializer(
             messages,
@@ -110,39 +133,24 @@ class MessageViewSet(viewsets.ViewSet):
         """
         pending_messages_qs = Message.objects\
             .get_pending_messages(request.user)
-        print('done')
         messages_serializer = MessageSerializer(pending_messages_qs,
                                                 context={'request': request},
                                                 many=True)
-        print('done2')
         # get relations of the rooms
         rooms = set()
-        print('done3')
         for message_data in messages_serializer.data:
             rooms.add(message_data['room'])
-        print('done4')
         rooms_obj = Room.objects.filter(id__in=rooms)
-        print('done5')
         rooms_serializer = RoomSerializer(rooms_obj,
                                           context={'request': request},
                                           many=True)
-        print('done6')
         # get relations of the users
         users = set()
-        print('done7')
         for room_data in rooms_serializer.data:
             users = users.union(set(room_data['participants']))
-        print('done8')
         users_obj = User.objects.filter(id__in=users)
-        print('done9')
         users_serializer = UserSerializer(users_obj, many=True)
-        print('done10')
         # combine response
-        print({
-            'messages': messages_serializer.data,
-            'rooms': rooms_serializer.data,
-            'users': users_serializer.data,
-        })
         return Response({
             'messages': messages_serializer.data,
             'rooms': rooms_serializer.data,
@@ -162,10 +170,11 @@ class MessageViewSet(viewsets.ViewSet):
             raise PermissionDenied(
                 detail='Current user is not authorized to publish in the room')
         # Message creation
-        message = serializer.save(
-            author=user,
-            pending_reception=room.participants.all(),
-            pending_read=room.participants.exclude(id=request.user.id))
+        message = serializer.save(author=user)
+        # .set() rather than save(pending_reception=...): M2M assignment rejects
+        # lists outright and only tolerates QuerySets by luck.
+        message.pending_reception.set(room.participants.all())
+        message.pending_read.set(room.participants.exclude(id=user.id))
         # Update activity timestamp of rooms
         room.save()
         # Push to participants

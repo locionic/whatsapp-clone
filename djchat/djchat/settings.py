@@ -22,13 +22,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'n+h&t*45mynnx6zt++nj&i-3z@g8osgsoj+kg2@cdcz0l%i&26'
+# The default is the development key, committed here as always. Setting
+# DJANGO_SECRET_KEY is what stops the deployed app from signing sessions and
+# auth tokens with a key that is public in this repo's history.
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'n+h&t*45mynnx6zt++nj&i-3z@g8osgsoj+kg2@cdcz0l%i&26')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-# DEBUG = False
+# problems.txt starts this app as `daphne -e ssl:443 -b 0.0.0.0`, so the
+# literal below was serving detailed tracebacks -- including local
+# variables -- to anyone who could make it raise. The default is unchanged so
+# `runserver` still works; DJANGO_DEBUG=false is what turns it off in the
+# deployment.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ["*"]
+# '*' is only safe while DEBUG is on: Django skips the check entirely then,
+# and with DEBUG off it lets any Host header through to password-reset and
+# cache poisoning. DJANGO_ALLOWED_HOSTS is a comma-separated list.
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
@@ -47,7 +59,6 @@ INSTALLED_APPS = [
     'corsheaders',
 
     'rest_framework',
-    'rest_framework_swagger',
 
     # 'channels',
     'crispy_bootstrap4',
@@ -160,6 +171,17 @@ STATICFILES_DIRS = (
 # STATIC_ROOT = os.path.join(BASE_DIR, 'public')
 STATIC_URL = '/static/'
 
+# WhiteNoiseMiddleware is in MIDDLEWARE above, but it indexed nothing once
+# DEBUG was off: autorefresh and use_finders both default to settings.DEBUG,
+# STATIC_ROOT is not set, and there is no WHITENOISE_ROOT -- so the static
+# tree (including the built bundle) was unreachable and every asset request
+# fell through to the catch-all view, which bounces anonymous callers to the
+# login page. problems.txt starts this app under daphne, where runserver's
+# staticfiles handler does not exist, so nothing else would have served them.
+# Indexing through the finders is what collectstatic + STATIC_ROOT would
+# otherwise do, and it needs no build step: the bundle is committed.
+WHITENOISE_USE_FINDERS = True
+
 
 
 # Channels Configuration Options
@@ -167,15 +189,11 @@ STATIC_URL = '/static/'
 
 # ASGI_APPLICATION = "djchat.routing.application"
 ASGI_APPLICATION = "djchat.asgi.application"
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             # "hosts": [('127.0.0.1', 6379)],
-#             "hosts": ["redis://:Be6RO6BKfnx7M7SRPmt8vwdQfCPigpTA@redis-13637.c61.us-east-1-3.ec2.cloud.redislabs.com:13637/0"],
-#         },
-#     },
-# }
+# For more than one worker process (nginx + daphne, or daphne with
+# --workers), swap the layer below for channels_redis: InMemoryChannelLayer
+# keeps its groups per-process, so group_send from a web worker would never
+# reach a socket held by another. The Redis host lives in your environment,
+# not here -- a credential pasted into settings is a credential in git.
 
 CHANNEL_LAYERS = {
     'default': {
@@ -188,7 +206,6 @@ CHANNEL_LAYERS = {
 # https://www.django-rest-framework.org/api-guide/settings/
 
 REST_FRAMEWORK = {
-    'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication'

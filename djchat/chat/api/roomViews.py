@@ -1,3 +1,6 @@
+import csv
+import io
+
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import ParseError
@@ -7,15 +10,24 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 from django.contrib.auth import get_user_model
+from django.db.models import Count
+from django.db.models.functions import TruncDate
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from datetime import timedelta
 
 from users.api.serializers import UserSerializer
-from .serializers import RoomSerializer, MessageSerializer
+from .serializers import RoomSerializer, CreateRoomSerializer, MessageSerializer
 from chat.models import Room, Message
 from friends.api.views import FriendshipRemoveAPIView
 
 channel_layer = get_channel_layer()
 User = get_user_model()
+
+# Wide enough to show a rhythm (weekends vs weekdays), short enough that a
+# year-old room is not mostly empty.
+ACTIVITY_DAYS = 30
 
 
 class RoomDeleteAPIView(APIView):
@@ -34,13 +46,116 @@ class RoomDeleteAPIView(APIView):
             data={'room_id': room.id})
         # Delete friendship if private
         if (room.kind == 1):
-            user_1 = room.participants.all()[0]
-            user_2 = room.participants.all()[1]
-            user_id = user_2.id if user_1 == request.user else user_1.id
+            # One query, not two: participants has no Meta.ordering, so
+            # indexing all()[0] and all()[1] separately can yield the two
+            # rows in different orders and "delete yourself as a friend".
+            participants = list(room.participants.all())
+            user_id = (participants[1].id if participants[0] == request.user
+                       else participants[0].id)
             FriendshipRemoveAPIView.post(self, request, user_id)
         # Delete room
         room.delete()
         return Response(None, status=status.HTTP_204_NO_CONTENT)
+
+
+class RoomExportAPIView(APIView):
+    """
+    Download a room's messages as JSON (default) or CSV
+    """
+
+    CSV_COLUMNS = ('id', 'author', 'body', 'timestamp')
+
+    def get(self, request, room_id, format=None):
+        # Same membership gate as every other room endpoint: 404, not 403, so
+        # the response does not confirm that the room exists.
+        room = get_object_or_404(request.user.rooms.all(), id=room_id)
+        messages = room.messages.order_by('timestamp')
+        # 'as', not 'format': DRF's URL_FORMAT_OVERRIDE is 'format', so
+        # content negotiation eats it, finds no renderer registered for 'csv',
+        # and 404s before this view is ever called.
+        export_format = request.query_params.get('as', 'json')
+
+        if export_format not in ('json', 'csv'):
+            raise ParseError(detail="as must be 'json' or 'csv'.")
+
+        if export_format == 'csv':
+            return self._csv(room, messages)
+        return self._json(request, room, messages)
+
+    def _payload(self, request, room, messages):
+        """The room block is assembled here rather than through RoomSerializer
+        on purpose: get_last_message() calls remove_user_from_pending(), so
+        serializing a room marks its last message as received and pushes
+        all_received to the sender. A read-only download should not do that."""
+        return {
+            'room': {
+                'id': room.id,
+                'kind': room.kind,
+                'group_name': room.group_name,
+                'participants': UserSerializer(room.participants.all(), many=True).data,
+            },
+            'message_count': messages.count(),
+            'messages': MessageSerializer(
+                messages, context={'request': request}, many=True).data,
+        }
+
+    def _json(self, request, room, messages):
+        response = Response(self._payload(request, room, messages))
+        # Same disposition as _csv, and for the same reason: this endpoint is a
+        # download, so both of its formats have to download. Without it `?as=csv`
+        # saved the file and `?as=json` -- the default -- navigated the tab away
+        # from the SPA and printed the payload on screen. It is also why the UI
+        # needs no JavaScript at all: a bare <a href> is the whole client.
+        response['Content-Disposition'] = \
+            f'attachment; filename="room-{room.id}.json"'
+        return response
+
+    def _csv(self, room, messages):
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(self.CSV_COLUMNS)
+        for message in messages:
+            writer.writerow([message.id, message.author_id, message.body,
+                             message.timestamp.isoformat()])
+
+        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = \
+            f'attachment; filename="room-{room.id}.csv"'
+        return response
+
+
+class RoomActivityAPIView(APIView):
+    """
+    How many messages this room got per day, for a small activity chart
+    """
+
+    def get(self, request, room_id, format=None):
+        room = get_object_or_404(request.user.rooms.all(), id=room_id)
+        # The chart draws one bar per day and reads them by position, so the
+        # series is zero-filled and in order -- a sparse list would plot the
+        # wrong day without looking wrong.
+        first_day = timezone.localdate() - timedelta(days=ACTIVITY_DAYS - 1)
+        counts = {
+            row['day']: row['n']
+            for row in room.messages
+            .filter(timestamp__date__gte=first_day)
+            .annotate(day=TruncDate('timestamp'))
+            .values('day')
+            .annotate(n=Count('id'))
+        }
+
+        per_day = []
+        for offset in range(ACTIVITY_DAYS):
+            day = first_day + timedelta(days=offset)
+            per_day.append({'date': day.isoformat(), 'count': counts.get(day, 0)})
+
+        return Response({
+            'room_id': room.id,
+            'days': ACTIVITY_DAYS,
+            'total': sum(counts.values()),
+            'peak': max(counts.values(), default=0),
+            'per_day': per_day,
+        })
 
 
 class RoomMarkAsReadAPIView(APIView):
@@ -86,7 +201,10 @@ class RecentRoomsAPIView(APIView):
     """
     Endpoints related to managing rooms with recent activity
     """
-    queryset = Room.objects.all()
+    # No `queryset`: this view reads request.user.rooms, and DRF derives an
+    # operationId's base name from queryset.model -- which made /rooms/recents
+    # claim 'listRooms', already taken by the RoomViewSet route.
+    serializer_class = RoomSerializer
 
     def get(self, request, format=None):
         """
@@ -132,48 +250,30 @@ class RoomViewSet(viewsets.ViewSet):
         """
         # get all rooms
         qs_rooms = request.user.rooms.all()
-        print('done_room_1')
         room_serializer = RoomSerializer(
             qs_rooms,
             context={'request': request},
             many=True)
-        print('done_room_2')
         # get relations of the rooms
         participants = set()
-        print('done_room_3')
         messages = set()
-        print('done_room_4')
         for room_data in room_serializer.data:
             participants = participants.union(set(room_data['participants']))
             messages.add(room_data['last_message'])
-        print('done_room_5')
         # build participants response
         participants_obj = User.objects.filter(id__in=participants)
-        print('done_room_6')
         users_serializer = UserSerializer(participants_obj, many=True)
-        print('done_room_8')
         # build messages response
         messages_obj = Message.objects.filter(id__in=messages)
-        print('done_room_9')
         messages_serializer = MessageSerializer(messages_obj,
                                                 context={'request': request},
                                                 many=True)
-        print('done_room_10')
-        print({
+        # combine response
+        return Response({
             'rooms': room_serializer.data,
             'messages': messages_serializer.data,
             'users': users_serializer.data
         })
-        # combine response
-        try:
-            return Response({
-                'rooms': room_serializer.data,
-                'messages': messages_serializer.data,
-                'users': users_serializer.data
-            })
-        except Exception as e:
-            print(e)
-            print('tai sao khong tra ve response')
 
     def create(self, request):
         """
@@ -181,7 +281,7 @@ class RoomViewSet(viewsets.ViewSet):
         """
         user = request.user
         # Validation of fields
-        serializer = RoomSerializer(
+        serializer = CreateRoomSerializer(
             data=request.data,
             context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -189,7 +289,19 @@ class RoomViewSet(viewsets.ViewSet):
         participants = serializer.validated_data.get('participants')
         if not user in participants:
             participants.append(user)
-        if len(participants) == 1:
+        # Distinct count, not length: the question is whether the author has
+        # anyone *else* in the room, and a list that names the author twice is
+        # two entries and one person. Counting let `[me, me]` through -- the
+        # append above is skipped when the author is already listed -- and
+        # `get_or_create_private` then added that same user twice, which is one
+        # participant. A private room with one participant is not a thing the
+        # rest of this file can read: RoomSerializer.get_group_name indexes
+        # `participants[0]` and RoomDeleteAPIView indexes `participants[1]`, so
+        # both the response here and every later /rooms/ call -- the app's
+        # first two requests on load -- raise IndexError. And the delete
+        # endpoint, the one way out, is one of them. Rejecting here keeps the
+        # row from being written, which is what makes it unrecoverable.
+        if len(set(participants)) == 1:
             raise ParseError(
                 detail='There must be at least one another participant.')
         # Validate by kind
@@ -199,27 +311,26 @@ class RoomViewSet(viewsets.ViewSet):
             if len(participants) != 2:
                 raise ParseError(
                     detail='Private chats must have exactly 2 participants.')
-            # There cant be two private chats with same participants
-            room_qs = Room.objects\
-                .filter(kind=kind, participants__in=[participants[0]])\
-                .filter(kind=kind, participants__in=[participants[1]])\
-                .first()
-            # If there exists private room return it
-            if room_qs:
-                return Response(RoomSerializer(room_qs,
-                                               context={'request': request}).data,
-                                status=status.HTTP_200_OK)
-            # Be sure to clear group name in private chats
-            if 'group_name' in serializer.validated_data:
-                serializer.validated_data['group_name'] = None
+            # There cant be two private chats with the same participants
+            # (shared with the accept signal, which used to create blindly)
+            room, created = Room.get_or_create_private(*participants)
+            if created:
+                room.signal_to_room('update_rooms', data={})
+            return Response(RoomSerializer(room, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED if created
+                            else status.HTTP_200_OK)
         elif (kind == 2):
             # Group chats must have a name
-            if not 'group_name' in serializer.validated_data:
-                raise ParseError(
-                    detail='Group rooms must have a name.')
-            if len(serializer.validated_data['group_name'].strip()) == 0:
+            group_name = serializer.validated_data.get('group_name')
+            if not group_name or len(group_name.strip()) == 0:
                 raise ParseError(
                     detail='Group rooms must have a name.')
         # Create room
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        room = serializer.save()
+        # This was the one push site that pushed nothing, and a group is the
+        # only room anyone can appear in without acting first -- so the people
+        # added to it saw no room until they reloaded by hand. 'update_rooms'
+        # is what App.vue already answers with fetchRooms.
+        room.signal_to_room('update_rooms', data={})
+        return Response(RoomSerializer(room, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)

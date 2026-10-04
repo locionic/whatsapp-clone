@@ -67,8 +67,7 @@
 
 # All received and all read
 
-# Check that all receive is true when all users have received it
-# and false when one or more user have not.
-
-# Check that all read is true when all users have read it and
-# false when one or more not.
+# Done -- test_message_pending.py. The announcement waits for the last pending
+# participant, and asking a second time announces nothing. Both guards in
+# chat/models.py can be deleted with nothing else in the project noticing, which
+# was true until that file existed.

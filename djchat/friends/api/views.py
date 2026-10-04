@@ -4,9 +4,11 @@ from rest_framework.response import Response
 
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from friends.exceptions import AlreadyExistsError, AlreadyFriendsError
-from friends.models import Friend, Follow, FriendshipRequest, Block
+from friends.models import Friend, FriendshipRequest
 
 from .serializers import (
     UserSerializer,
@@ -26,28 +28,20 @@ class MyFriendsAPIView(APIView):
         return Response(serializer.data)
 
 
-class FriendsAPIView(APIView):
-    """ View the friends of a user """
-
-    def get(self, request, user_id, format=None):
-        user = get_object_or_404(user_model, id=user_id)
-        friends = Friend.objects.friends(user)
-        serializer = UserSerializer(friends, many=True)
-        return Response(serializer.data)
-
-
 class FriendshipAddAPIView(APIView):
     """ Create a FriendshipRequest """
 
     def post(self, request, user_id, format=None):
-        to_user = user_model.objects.get(id=user_id)
+        to_user = get_object_or_404(user_model, id=user_id)
         from_user = request.user
         try:
             Friend.objects.add_friend(from_user, to_user)
-        except AlreadyExistsError as e:
+        except AlreadyExistsError:
             return Response({'detail': 'Friendship request already exists.'}, status=status.HTTP_400_BAD_REQUEST)
-        except AlreadyFriendsError as e:
+        except AlreadyFriendsError:
             return Response({'detail': 'The users are already friends.'}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as e:
+            return Response({'detail': e.messages}, status=status.HTTP_400_BAD_REQUEST)
         return FriendshipSentRequestListAPIView.get(self, request)
 
 
@@ -55,7 +49,7 @@ class FriendshipRemoveAPIView(APIView):
     """ Create a FriendshipRequest """
 
     def post(self, request, user_id, format=None):
-        to_user = user_model.objects.get(id=user_id)
+        to_user = get_object_or_404(user_model, id=user_id)
         from_user = request.user
         could_remove = Friend.objects.remove_friend(from_user, to_user)
         if could_remove:
@@ -71,8 +65,15 @@ class FriendshipAcceptAPIView(APIView):
         return FriendshipRequestDetailAPIView.get(self, request, friendship_request_id=friendship_request_id)
 
     def post(self, request, friendship_request_id, format=None):
+        # A rejected request keeps its row -- that is how the receiver's
+        # rejected list is built -- so friendship_requests_received still
+        # holds it. Without this filter the rejecter could accept their own
+        # dismissal and create the friendship they had just refused, without
+        # the sender ever seeing an answer change.
         f_request = get_object_or_404(
-            request.user.friendship_requests_received, id=friendship_request_id
+            request.user.friendship_requests_received.filter(
+                rejected__isnull=True),
+            id=friendship_request_id
         )
         f_request.accept()
         return FriendshipRequestListAPIView.get(self, request)
@@ -99,8 +100,16 @@ class FriendshipCancelAPIView(APIView):
         return FriendshipRequestDetailAPIView.get(self, request, friendship_request_id=friendship_request_id)
 
     def post(self, request, friendship_request_id, format=None):
+        # The same filter the accept endpoint has, for the same reason. A
+        # rejected request keeps its row -- that is how the receiver's rejected
+        # list is built, and `add_friend` revives that same row if they ask
+        # again -- but `friendship_requests_sent` still holds it, so cancelling
+        # by id deleted the receiver's record of the dismissal. 404 rather than
+        # 200: `sent_requests` already hides the row from the Sent tab, so
+        # there was never a Cancel button pointing at it.
         f_request = get_object_or_404(
-            request.user.friendship_requests_sent, id=friendship_request_id
+            request.user.friendship_requests_sent.filter(rejected__isnull=True),
+            id=friendship_request_id
         )
         f_request.cancel()
         return FriendshipSentRequestListAPIView.get(self, request)
@@ -141,7 +150,9 @@ class FriendshipRequestDetailAPIView(APIView):
 
     def get(self, request, friendship_request_id, format=None):
         f_request = get_object_or_404(
-            FriendshipRequest, id=friendship_request_id)
+            FriendshipRequest.objects.filter(
+                Q(from_user=request.user) | Q(to_user=request.user)),
+            id=friendship_request_id)
         serializer = FriendshipRequestSerializer(
             f_request)
         return Response(serializer.data)

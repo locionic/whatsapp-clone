@@ -112,6 +112,22 @@ export default {
         return str;
       }
       return str.slice(0, num) + "...";
+    },
+    // A named method, not an inline arrow: `$off` can only give back the exact
+    // function reference that `$on` was given, and an inline handler has none to
+    // hand back.
+    onWriting(data) {
+      if (this.room.id !== data.room_id) return;
+      // `state.users` is empty for the first seconds of every session -- the
+      // socket connects before the first fetch resolves (items 16 and 20) -- so
+      // a peer who starts typing while you are still loading sends a name the
+      // store has not seen. This used to throw a TypeError from inside a
+      // WebSocket event handler, which Vue swallows into a console warning.
+      let user = this.$store.state.users[data.user_id];
+      this.whosWriting = user ? user.username : "";
+      setTimeout(() => {
+        this.whosWriting = "";
+      }, 10000);
     }
   },
   computed: {
@@ -154,15 +170,14 @@ export default {
     }
   },
   created() {
-    EventBus.$on("writing", data => {
-      if (this.room.id === data.room_id) {
-        let user = this.$store.state.users[data.user_id];
-        this.whosWriting = user.username;
-        setTimeout(() => {
-          this.whosWriting = "";
-        }, 10000);
-      }
-    });
+    EventBus.$on("writing", this.onWriting);
+  },
+  beforeDestroy() {
+    // Paired with the `$on` above, and for the same reason `WindowSize` tears
+    // down its resize listener: this row is created and destroyed every time a
+    // room is added or removed, and a subscription left behind keeps the whole
+    // dead component -- and its store reference -- alive for the session.
+    EventBus.$off("writing", this.onWriting);
   },
   watch: {
     lastMessage() {

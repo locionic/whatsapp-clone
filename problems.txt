@@ -2,3 +2,22 @@ django.core.exceptions.ImproperlyConfigured: Cannot import ASGI_APPLICATION modu
 Solve: asgi -> channels version -> django version => Must check version and compatible between packages (pypi site)
 
 start command: cd djchat && python manage.py migrate && export DJANGO_SUPERUSER_EMAIL=xxx@email.com && export DJANGO_SUPERUSER_USERNAME=xxx && export DJANGO_SUPERUSER_PASSWORD=xxx && python manage.py createsuperuser --noinput && daphne -e ssl:443 -b 0.0.0.0 djchat.asgi:application
+
+also export these three, or the app ships DEBUG=True, a SECRET_KEY that is
+public in this repo, and ALLOWED_HOSTS=['*'] to anyone who can reach :443:
+  export DJANGO_DEBUG=false
+  export DJANGO_SECRET_KEY=<a fresh random string>
+  export DJANGO_ALLOWED_HOSTS=<the host you serve, comma-separated>
+defaults are unchanged, so `python manage.py runserver` needs none of them
+
+the js bundle is a committed artifact that nothing used to build on deploy:
+templates/index.html loads static/dist/bundle.js straight out of the repo, and
+vue.config.js is what puts it there (outputDir "../static/dist/"). editing
+frontend/src and restarting without rebuilding serves the OLD js and the edit
+looks like it did nothing -- stale-by-default, and the stale copy is what you
+are testing. ./deploy.sh now runs that build before the start command above:
+  source venv/bin/activate && ./deploy.sh
+it needs node on the machine that runs it. the app needs no node at runtime, so
+if the deploy host has none, do not install it as the host's start command --
+build on your own machine instead and commit the result:
+  cd djchat/frontend && npm ci && npm run build && git add ../static/dist

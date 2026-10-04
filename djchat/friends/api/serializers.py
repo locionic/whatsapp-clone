@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from friends.models import Friend, FriendshipRequest
+from friends.models import FriendshipRequest
 
 User = get_user_model()
 

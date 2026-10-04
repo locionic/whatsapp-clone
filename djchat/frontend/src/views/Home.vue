@@ -9,6 +9,7 @@
       id="overlay"
     ></div>
     <invitation-modal ref="invitation-modal" />
+    <new-group-modal ref="new-group-modal" />
 
     <div class="flex flex-wrap">
       <div class="w-full md:w-1/3">
@@ -34,6 +35,7 @@
             @profile="toggleLeftSidenav"
             @whosWriting="setWriting($event)"
             @invite-action="openInvitationModal"
+            @group-action="openNewGroupModal"
             @selected-room="openMobileRooms"
           />
 
@@ -57,6 +59,7 @@
 import UsersSection from "@/components/users/UsersSection.vue";
 import Invitations from "@/components/invitations/Invitations.vue";
 import InvitationModal from "@/components/invitations/InvitationModal.vue";
+import NewGroupModal from "@/components/rooms/NewGroupModal.vue";
 import UserProfile from "@/components/profiles/UserProfile.vue";
 import Rooms from "@/components/rooms/Rooms.vue";
 import SideRooms from "@/components/rooms/SideRooms.vue";
@@ -66,6 +69,7 @@ export default {
     UsersSection,
     Invitations,
     InvitationModal,
+    NewGroupModal,
     UserProfile,
     Rooms,
     SideRooms
@@ -93,6 +97,9 @@ export default {
   methods: {
     openInvitationModal() {
       this.$refs["invitation-modal"].open();
+    },
+    openNewGroupModal() {
+      this.$refs["new-group-modal"].open();
     },
     openMobileRooms() {
       if ("mobile-rooms" in this.$refs && this.$refs["mobile-rooms"]) {

@@ -58,13 +58,14 @@
             >
               <!-- Tagline textarea -->
               <textarea
-                class="appearance-none bg-transparent border-none w-full text-gray-700 mr-3 py-1 px-2 leading-tight focus:outline-none"
+                class="appearance-none bg-transparent border-none w-full text-gray-700 mr-3 py-1 px-2 leading-tight focus:outline-none focus:shadow-outline"
                 type="text"
                 placeholder="Add some info."
                 aria-label="Description"
                 rows="3"
                 v-model="tagline"
                 :disabled="isPatching"
+                :maxlength="maxTagline"
               ></textarea>
 
               <!-- Save button -->
@@ -76,6 +77,7 @@
                 }"
                 type="button"
                 :disabled="isPatching"
+                :maxlength="maxTagline"
                 @click="patchUserProfile"
               >
                 Save
@@ -83,8 +85,10 @@
             </div>
           </form>
 
+          <!-- One chain, not two v-ifs: a <transition> takes a single child. -->
           <transition name="fade">
             <success-alert v-if="showSuccess" class="m-3" />
+            <success-alert v-else-if="showError" class="m-3" :error="true" />
           </transition>
         </div>
       </div>
@@ -104,7 +108,13 @@ export default {
     return {
       tagline: "",
       isPatching: false,
-      showSuccess: false
+      showSuccess: false,
+      showError: false,
+      // users.models.CustomUser.tagline max_length. The server rejects more
+      // than this, and the textarea used to accept it silently -- so a paste
+      // over the limit came back as a 400 that nothing displayed, and the
+      // user's bio looked saved while the old one stayed put.
+      maxTagline: 1024
     };
   },
   props: {
@@ -122,14 +132,25 @@ export default {
         });
         this.showSuccessAlert();
       } catch (error) {
-        console.log(error);
+        // Was a bare console.log, so a rejected save said nothing at all: the
+        // button re-enabled, no alert, and the text the user just wrote stayed
+        // in the box looking like it had been kept.
+        this.showErrorAlert();
       }
       this.isPatching = false;
     },
     showSuccessAlert() {
       this.showSuccess = true;
+      this.showError = false;
       setTimeout(() => {
         this.showSuccess = false;
+      }, 5000);
+    },
+    showErrorAlert() {
+      this.showError = true;
+      this.showSuccess = false;
+      setTimeout(() => {
+        this.showError = false;
       }, 5000);
     }
   },

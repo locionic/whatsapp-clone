@@ -34,78 +34,145 @@
         </div>
       </div>
 
-      <!-- Cancel request button -->
+      <!-- Accept request button -->
       <div v-if="received" class="mx-2">
-        <i
-          class="material-icons p-2 rounded-full shadow hover:shadow-lg
-            cursor-pointer hover:shadow hover:bg-green-300 border"
-          style="transition: background-color 0.3s, box-shadow 0.3s;"
+        <button
+          type="button"
+          class="p-0 bg-transparent border-0 cursor-pointer"
+          aria-label="Accept invitation"
           @click="$emit('add', invitation.id)"
-          >person_add</i
         >
+          <i
+            class="material-icons p-2 rounded-full shadow hover:shadow-lg
+              cursor-pointer hover:bg-green-300 border"
+            style="transition: background-color 0.3s, box-shadow 0.3s;"
+            aria-hidden="true"
+            >person_add</i
+          >
+        </button>
       </div>
 
-      <!-- Cancel request button -->
+      <!-- Reject a received request, cancel one you sent -->
       <div class="mx-2">
-        <i
-          class="material-icons p-2 rounded-full shadow hover:shadow-lg
-            cursor-pointer hover:shadow hover:bg-red-300 border"
-          style="transition: background-color 0.3s, box-shadow 0.3s;"
+        <button
+          type="button"
+          class="p-0 bg-transparent border-0 cursor-pointer"
+          :aria-label="received ? 'Reject invitation' : 'Cancel request'"
           @click="$emit('remove', invitation.id)"
-          >delete</i
         >
+          <i
+            class="material-icons p-2 rounded-full shadow hover:shadow-lg
+              cursor-pointer hover:bg-red-300 border"
+            style="transition: background-color 0.3s, box-shadow 0.3s;"
+            aria-hidden="true"
+            >delete</i
+          >
+        </button>
       </div>
     </div>
+
   </div>
+
 </template>
 
+
+
 <script>
+
 import dateFormat from "dateformat";
 
+
+
 export default {
+
   props: {
+
     invitation: {
+
       type: Object,
+
       required: true
+
     },
+
     user: {
+
       type: Object,
+
       required: true
+
     },
+
     received: {
+
       type: Boolean,
+
       required: false
+
     }
+
   },
+
   methods: {
+
     formatDate(date) {
+
       let formatted_date = dateFormat(new Date(date), "dd - mm - yyyy");
+
       return formatted_date;
+
     }
+
   }
+
 };
+
 </script>
 
+
+
 <style scoped>
+
 .circle {
+
   width: 20px;
+
   height: 20px;
+
   border-radius: 50%;
+
   font-size: 12px;
+
   color: #fff;
+
   line-height: 20px;
+
   text-align: center;
+
   background: #38b2ac;
+
 }
 
+
+
 .avatar-circle {
+
   width: 40px;
+
   height: 40px;
+
   border-radius: 50%;
+
   font-size: 25px;
+
   color: #fff;
+
   line-height: 40px;
+
   text-align: center;
+
   font-weight: 600;
+
 }
+
 </style>

@@ -69,7 +69,32 @@ const actions = {
         .catch(error => reject(error));
     });
   },
-  sendMessage(none, { room, body, front_key }) {
+  // `?search=` rather than paging: the same endpoint `fetchPastMessages` uses,
+  // asked a different question. Results go to their own map instead of into the
+  // thread -- they are the same messages with their neighbours missing, and
+  // `LINK_MESSAGES_TO_ROOM` would splice them into the middle of a conversation.
+  //
+  // No `new Promise` wrapper, unlike every action above it: returning the axios
+  // promise gives the caller the same thing to await and the same rejection to
+  // catch, and the wrapper only ever forwarded both.
+  searchMessages({ commit }, { room, term }) {
+    // `encodeURIComponent`, because the term is arbitrary text and the URL is
+    // built by hand. Bare, `the&other=x` becomes a search for "the" with an
+    // unrelated parameter attached -- which runs, returns the wrong things, and
+    // says nothing about it.
+    return axios
+      .get(`/api/v1/messages/${room}?search=${encodeURIComponent(term)}`)
+      .then(response => {
+        // `users` first, always: a result is rendered by `received-message`,
+        // which resolves its author against `state.users` and dereferences that
+        // unguarded, so a result whose author is missing renders an empty
+        // subtree rather than an error.
+        commit("SET_USERS", response.data.users);
+        commit("SET_SEARCH_RESULTS", response.data.messages);
+        return response;
+      });
+  },
+  sendMessage({ commit }, { room, body, front_key }) {
     let payload = {
       room,
       body,
@@ -81,7 +106,14 @@ const actions = {
         .then(response => {
           resolve(response);
         })
-        .catch(error => reject(error));
+        .catch(error => {
+          // The message is already on screen with `sending: true` and the box is
+          // already empty, and nothing else ever takes either back: `sending` is
+          // only cleared when the server's own copy comes back, which it never
+          // will. Here, where the rejection is, is the only place that knows.
+          commit("REMOVE_FAILED_MESSAGE", { front_key, room });
+          reject(error);
+        });
     });
   },
   markMessageAsRead({ commit }, message_id) {
@@ -109,7 +141,7 @@ const actions = {
   postWriting(none, room_id) {
     return new Promise((resolve, reject) => {
       axios
-        .post(`api/v1/rooms/${room_id}/writing`)
+        .post(`/api/v1/rooms/${room_id}/writing`)
         .then(response => {
           resolve(response);
         })
@@ -132,23 +164,23 @@ const actions = {
       axios
         .get("/api/v1/friends/requests/sent")
         .then(response => {
-          console.log('response')
-          console.log(response)
           commit("SET_SENT_INVITATIONS", response.data);
           resolve(response);
         })
-        // .catch(error => reject(error));
-        .catch(error => {
-          console.log('loieeeeeeeeee')
-          console.log(error)
-          reject(error)
-        });
+        .catch(error => reject(error));
     });
   },
   getUserIdFromEmail(none, email) {
     return new Promise((resolve, reject) => {
+      // encodeURIComponent, and not for tidiness: in a query string `+` means
+      // space, and the browser sends it as a `+`, so the server decodes
+      // `bob+chat@gmail.com` to `bob chat@gmail.com` and finds nobody. The
+      // lookup then 404s and the modal says "User not found." for an address
+      // that is registered. The two sibling query strings interpolate a
+      // message id and an offset -- both numbers from the app itself -- so
+      // this is the one site where typed input reaches a URL.
       axios
-        .get(`/api/v1/users?email=${email}`)
+        .get(`/api/v1/users?email=${encodeURIComponent(email)}`)
         .then(response => {
           resolve(response);
         })
@@ -237,6 +269,33 @@ const actions = {
         .patch("/api/v1/me", payload)
         .then(response => {
           commit("SET_USER_PROFILE", response.data);
+          resolve(response);
+        })
+        .catch(error => reject(error));
+    });
+  },
+  fetchRoomActivity({ commit }, roomId) {
+    return new Promise((resolve, reject) => {
+      axios
+        .get(`/api/v1/rooms/${roomId}/activity`)
+        .then(response => {
+          commit("SET_ROOM_ACTIVITY", response.data);
+          resolve(response);
+        })
+        .catch(error => reject(error));
+    });
+  },
+  createGroup(none, { group_name, participants }) {
+    return new Promise((resolve, reject) => {
+      // The list endpoint, not an id: there is no room to address yet. And no
+      // commit afterwards - `RoomViewSet.create` pushes `update_rooms` to every
+      // participant including the author, which `App.vue` already answers with
+      // `fetchRooms`. `kind` is `RoomKind.GROUP`, and it is load-bearing: 1
+      // builds a private room instead, which the view then refuses unless the
+      // list has exactly two entries.
+      axios
+        .post("/api/v1/rooms/", { kind: 2, group_name, participants })
+        .then(response => {
           resolve(response);
         })
         .catch(error => reject(error));

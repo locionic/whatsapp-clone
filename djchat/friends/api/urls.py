@@ -2,7 +2,6 @@ from django.urls import path
 
 from .views import (
     MyFriendsAPIView,
-    FriendsAPIView,
     FriendshipAddAPIView,
     FriendshipRemoveAPIView,
     FriendshipAcceptAPIView,
@@ -17,9 +16,6 @@ from .views import (
 urlpatterns = [
     path('friends', MyFriendsAPIView.as_view(),
          name="friendship_view_my_friends"),
-
-    path('friends/<int:user_id>', FriendsAPIView.as_view(),
-         name="friendship_view_friends"),
 
     path('friends/add/<int:user_id>', FriendshipAddAPIView.as_view(),
          name="friendship_add_friend"),

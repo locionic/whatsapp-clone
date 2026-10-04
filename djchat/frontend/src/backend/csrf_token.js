@@ -17,5 +17,4 @@ function getCookie(name) {
 }
 
 var CSRF_TOKEN = getCookie("csrftoken");
-console.log('csrf_token: ', CSRF_TOKEN)
 export { CSRF_TOKEN };

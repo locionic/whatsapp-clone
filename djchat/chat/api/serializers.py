@@ -74,4 +74,21 @@ class RoomSerializer(serializers.ModelSerializer):
             participants = list(obj.participants.all())
             participants.remove(current_user)
             return UserSerializer(participants[0]).data
-        return obj.group_name
+        # A group has no single profile, but the client reads username off
+        # this field for its avatar and heading -- returning the bare name
+        # string left it truthy but .username-less, so group profiles
+        # rendered blank.
+        return {'id': None, 'username': obj.group_name, 'tagline': ''}
+
+
+class CreateRoomSerializer(serializers.ModelSerializer):
+    """ Writable side of the room API.
+
+    RoomSerializer shadows `group_name` with a SerializerMethodField (private
+    rooms report the peer's username), which makes it read-only and silently
+    drops the name on create. Validate writes here instead.
+    """
+
+    class Meta:
+        model = Room
+        fields = ('kind', 'participants', 'group_name')

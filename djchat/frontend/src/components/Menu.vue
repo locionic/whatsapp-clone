@@ -1,11 +1,27 @@
 <template>
   <div class="menu">
+    <!-- Hover was the only way in, and this holds the only Logout in the app.
+         `focusin` is what makes it a control rather than a hover target: the
+         dropdown is `v-if`'d, so while it is closed the Logout link is not in
+         the DOM to be tabbed to, and nothing that does not need a pointer can
+         open it. On a touch device - where UsersSection:25 renders this as the
+         *only* logout - a hover is not a gesture anyone has. -->
     <div
-      class="cursor-pointer mr-3 dropdown"
+      class="mr-3 dropdown"
       @mouseover="showContext = true"
       @mouseleave="showContext = false"
+      @focusin="showContext = true"
+      @focusout="onFocusOut"
+      @keydown.esc="showContext = false"
     >
-      <i class="material-icons text-2xl mx-1 dropbtn">more_vert</i>
+      <button
+        class="cursor-pointer dropbtn"
+        aria-label="Account menu"
+        aria-haspopup="true"
+        :aria-expanded="showContext ? 'true' : 'false'"
+      >
+        <i class="material-icons text-2xl mx-1">more_vert</i>
+      </button>
       <transition name="fade">
         <div class="dropdown-content rounded-lg" v-if="showContext">
           <a href="/accounts/logout/" class="flex rounded-lg">
@@ -24,6 +40,17 @@ export default {
     return {
       showContext: false
     };
+  },
+  methods: {
+    // `focusout` fires for the button too, so closing on it would snap the menu
+    // shut the moment you tab from the trigger onto the only link it contains -
+    // a keyboard path that dies one step in. Close when focus leaves the menu,
+    // not when it moves within it.
+    onFocusOut(event) {
+      if (!this.$el.contains(event.relatedTarget)) {
+        this.showContext = false;
+      }
+    }
   }
 };
 </script>

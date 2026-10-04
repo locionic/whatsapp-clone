@@ -7,7 +7,7 @@
           <!-- Sent Tab -->
           <button
             @click="selectedTab = 0"
-            class="w-1/2 text-gray-600 py-3 block hover:text-blue-500 focus:outline-none"
+            class="w-1/2 text-gray-600 py-3 block hover:text-blue-500 focus:outline-none focus:shadow-outline"
             :class="{
               'text-blue-500 border-b-2 font-medium border-blue-500':
                 selectedTab === 0
@@ -27,7 +27,7 @@
           <!-- Received Tab -->
           <button
             @click="selectedTab = 1"
-            class="w-1/2 text-gray-600 py-3 block hover:text-blue-500 focus:outline-none"
+            class="w-1/2 text-gray-600 py-3 block hover:text-blue-500 focus:outline-none focus:shadow-outline"
             :class="{
               'text-blue-500 border-b-2 font-medium border-blue-500':
                 selectedTab === 1
@@ -45,6 +45,14 @@
           </button>
         </nav>
       </div>
+
+      <p
+        v-if="error"
+        class="invitation-error text-sm text-red-500 mx-3 mb-2"
+        role="alert"
+      >
+        {{ error }}
+      </p>
 
       <!-- Tabs Content -->
       <div class="tabs-content">
@@ -107,7 +115,14 @@ import InviteFriend from "./InviteFriend";
 export default {
   data() {
     return {
-      selectedTab: 0
+      selectedTab: 0,
+      // Set only here, so before this field existed there was nowhere a
+      // failure could be reported from. The three actions below re-render the
+      // tabs on success and did nothing at all otherwise, which left the
+      // invitation sitting there looking live, with the same button still on
+      // it and nothing to say the press had not taken. Item 19's wording on
+      // the delete-chat button, for the same reason.
+      error: ""
     };
   },
   components: {
@@ -116,13 +131,25 @@ export default {
   },
   methods: {
     acceptInvitation(invitationId) {
-      this.$store.dispatch("acceptFriendRequest", invitationId);
+      return this.actOnInvitation("acceptFriendRequest", invitationId);
     },
     rejectInvitation(invitationId) {
-      this.$store.dispatch("rejectFriendRequest", invitationId);
+      return this.actOnInvitation("rejectFriendRequest", invitationId);
     },
     cancelInvitation(invitationId) {
-      this.$store.dispatch("cancelFriendRequest", invitationId);
+      return this.actOnInvitation("cancelFriendRequest", invitationId);
+    },
+    actOnInvitation(action, invitationId) {
+      // Cleared up front rather than on success, so a refusal replaces the
+      // previous refusal instead of stacking on a stale one.
+      this.error = "";
+      // Returned, so the caller sees a settled promise either way. Dropping
+      // it leaves the method's outcome unobservable -- and an un-awaited
+      // rejection is what took the whole jest runner down before the catch
+      // existed.
+      return this.$store.dispatch(action, invitationId).catch(() => {
+        this.error = "The invitation could not be updated. Please try again.";
+      });
     }
   },
   computed: {

@@ -3,15 +3,17 @@
     <!-- Search Panel -->
     <div class="flex items-center search-panel border-b" style="height: 10vh">
       <!-- Avatar -->
-      <div
-        class="avatar-circle flex-none mx-3 select-none cursor-pointer hover:shadow-md"
+      <button
+        type="button"
+        class="avatar-circle flex-none mx-3 select-none cursor-pointer hover:shadow-md p-0 bg-transparent border-0"
         :style="
           `background-color: rgb(${getColor.red},${getColor.green},${getColor.blue}); transition: box-shadow 0.3s;`
         "
+        aria-label="Open your profile"
         @click="$emit('profile')"
       >
         {{ getAvatarName }}
-      </div>
+      </button>
 
       <div class="flex-grow ">
         <search
@@ -19,6 +21,20 @@
           @updateSearch="currentSearch = $event"
         />
       </div>
+
+      <!-- The only way into `NewGroupModal`, and the only way to make a group at
+           all: `RoomViewSet.create` has been wired since the first commit and
+           nothing in the app called it. A `div` with a click handler would be
+           the house style here, and would leave it out of the tab order exactly
+           like items 38 to 50 were. Named by its own text, so there is no
+           aria-label to drift away from it. -->
+      <button
+        type="button"
+        class="new-group-trigger mr-3 flex-none text-sm font-semibold text-teal-600 hover:text-teal-800"
+        @click="$emit('group-action')"
+      >
+        New group
+      </button>
 
       <Menu v-if="width < 768" />
     </div>
@@ -29,7 +45,11 @@
         <div
           v-for="room in rooms"
           :key="room.id"
+          role="button"
+          tabindex="0"
+          :aria-current="room.id === $store.state.selectedRoom"
           @click="selectRoom(room.id)"
+          @keydown.enter.space.prevent="selectRoom(room.id)"
           class="user-row"
           v-show="checkIfRowInQueriedResults(room.id)"
         >

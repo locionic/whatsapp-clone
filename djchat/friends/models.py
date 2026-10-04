@@ -16,14 +16,16 @@ from friends.signals import (
     friendship_request_viewed,
     friendship_request_accepted,
     friendship_removed,
-    # follower_created,
-    # follower_removed,
-    # followee_created,
-    # followee_removed,
-    # following_created,
-    # following_removed,
-    # block_created,
-    # block_removed,
+    follower_created,
+    follower_removed,
+    followee_created,
+    followee_removed,
+    following_created,
+    following_removed,
+    block_created,
+    block_removed,
+    blocking_created,
+    blocking_removed,
 )
 
 AUTH_USER_MODEL = get_user_model()
@@ -108,7 +110,11 @@ class FriendshipRequest(models.Model):
         unique_together = ("from_user", "to_user")
 
     def __str__(self):
-        return "%s" % self.from_user_id
+        # Both sides, like the other three `__str__`s in this file. This one was
+        # `"%s" % self.from_user_id` -- a bare sender id -- and all four models
+        # are registered in `admin.py:26-29`, so that string is the changelist
+        # column and the dropdown label a request is picked out of.
+        return "User #%s invited #%s" % (self.from_user_id, self.to_user_id)
 
     def accept(self):
         """ Accept this friendship request """
@@ -149,13 +155,21 @@ class FriendshipRequest(models.Model):
         self.save()
         friendship_request_rejected.send(sender=self)
         bust_cache("requests", self.to_user.pk)
+        # The row survives the rejection, and both list queries now exclude it
+        # with `rejected__isnull=True`. Busting is what makes it disappear from
+        # the other side's tab -- the row itself stays for `rejected_requests`,
+        # and staying is what keeps a rejection from becoming a standing
+        # refusal in add_friend.
+        bust_cache("sent_requests", self.from_user.pk)
 
     def cancel(self):
         """ cancel this friendship request """
-        from_user = self.from_user,
+        from_user = self.from_user
         to_user = self.to_user
         self.delete()
         friendship_request_canceled.send(
+            # self is already deleted, so its pk is None and unhashable --
+            # the dispatcher keys receivers on sender. Use the class.
             sender=self.__class__,
             from_user=from_user,
             to_user=to_user
@@ -200,7 +214,7 @@ class FriendshipManager(models.Manager):
             qs = (
                 FriendshipRequest.objects.select_related(
                     "from_user", "to_user")
-                .filter(to_user=user)
+                .filter(to_user=user, rejected__isnull=True)
                 .all()
             )
             requests = list(qs)
@@ -217,7 +231,7 @@ class FriendshipManager(models.Manager):
             qs = (
                 FriendshipRequest.objects.select_related(
                     "from_user", "to_user")
-                .filter(from_user=user)
+                .filter(from_user=user, rejected__isnull=True)
                 .all()
             )
             requests = list(qs)
@@ -344,9 +358,17 @@ class FriendshipManager(models.Manager):
         )
 
         if created is False:
-            raise AlreadyExistsError("Friendship already requested")
-
-        if message:
+            # A rejected request keeps its row -- that is how the receiver's
+            # "rejected" list is built -- so get_or_create hands that same row
+            # back rather than making a second one (unique_together forbids
+            # it). Asking again revives it: nulling rejected is what moves it
+            # out of the dismissed list, and nulling viewed is what makes the
+            # receiver's client show it as unread again.
+            request.rejected = None
+            request.viewed = None
+            request.message = message
+            request.save()
+        elif message:
             request.message = message
             request.save()
 
@@ -357,12 +379,15 @@ class FriendshipManager(models.Manager):
         return request
 
     def can_request_send(self, from_user, to_user):
-        """ Checks if a request was sent """
+        """ Checks if a request is already pending """
         if from_user == to_user:
             return False
 
+        # A rejected row is a dismissal, not a standing refusal. Counting it
+        # here is what made a rejection permanent -- add_friend refused on any
+        # leftover row, so the pair could never ask again.
         if not FriendshipRequest.objects.filter(
-            from_user=from_user, to_user=to_user
+            from_user=from_user, to_user=to_user, rejected__isnull=True
         ).exists():
             return False
 
@@ -545,13 +570,13 @@ class BlockManager(models.Manager):
     """ Following manager """
 
     def blocked(self, user):
-        """ Return a list of all blocks """
+        """ Return a list of all users that have blocked `user` """
         key = cache_key("blocked", user.pk)
         blocked = cache.get(key)
 
         if blocked is None:
             qs = Block.objects.filter(blocked=user).all()
-            blocked = [u.blocked for u in qs]
+            blocked = [u.blocker for u in qs]
             cache.set(key, blocked)
 
         return blocked
@@ -584,7 +609,7 @@ class BlockManager(models.Manager):
 
         block_created.send(sender=self, blocker=blocker)
         block_created.send(sender=self, blocked=blocked)
-        block_created.send(sender=self, blocking=relation)
+        blocking_created.send(sender=self, blocking=relation)
 
         bust_cache("blocked", blocked.pk)
         bust_cache("blocking", blocker.pk)
@@ -597,18 +622,20 @@ class BlockManager(models.Manager):
             rel = Block.objects.get(blocker=blocker, blocked=blocked)
             block_removed.send(sender=rel, blocker=rel.blocker)
             block_removed.send(sender=rel, blocked=rel.blocked)
-            block_removed.send(sender=rel, blocking=rel)
+            blocking_removed.send(sender=rel, blocking=rel)
             rel.delete()
             bust_cache("blocked", blocked.pk)
             bust_cache("blocking", blocker.pk)
             return True
-        except Follow.DoesNotExist:
+        except Block.DoesNotExist:
             return False
 
     def is_blocked(self, user1, user2):
         """ Are these two users blocked? """
-        block1 = cache.get(cache_key("blocks", user1.pk))
-        block2 = cache.get(cache_key("blocks", user2.pk))
+        # These must be the two keys the getters below populate and that
+        # add_block/remove_block bust -- "blocks" is never written.
+        block1 = cache.get(cache_key("blocking", user1.pk))
+        block2 = cache.get(cache_key("blocked", user2.pk))
         if block1 and user2 in block1:
             return True
         elif block2 and user1 in block2:
