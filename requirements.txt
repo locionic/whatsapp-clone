@@ -23,3 +23,11 @@ daphne
 # channels[daphne]
 # gunicorn
 # waitress
+
+# --- dev/test only ---------------------------------------------------
+# Not needed to run the app; required by ./run_tests.sh.
+# pytest-django is not optional here: pytest.ini sets DJANGO_SETTINGS_MODULE,
+# which plain pytest ignores (it only knows DJANGO_SETTINGS_MODULE via the
+# pytest-django plugin).
+pytest
+pytest-django
