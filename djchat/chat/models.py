@@ -65,25 +65,34 @@ class Message(models.Model):
                     'data': data
                 })
 
+    def signal_delivery_receipt(self, kind):
+        """Tell the room this message changed delivery state.
+
+        A `delivery_receipt` event rather than a `chat_message` one, so all
+        three receipts cross the wire the same way and the consumer can reject
+        a kind it does not know in one place instead of each producer picking
+        its own spelling.
+        """
+        for participant in self.room.participants.all():
+            async_to_sync(channel_layer.group_send)(
+                f"group_general_user_{participant.id}", {
+                    "type": "delivery_receipt",
+                    'data': {'message_id': self.id, 'kind': kind},
+                })
+
     def remove_user_from_pending(self, user):
         if self.pending_reception.filter(id=user.id).exists():
             self.pending_reception.remove(user)
             # If there are no more pending then signal
             if not self.pending_reception.exists():
-                self.signal_to_room('update_message', {
-                    'message_id': self.id,
-                    'kind': 'all_received'
-                })
+                self.signal_delivery_receipt('all_received')
 
     def mark_as_read(self, user):
         if self.pending_read.filter(id=user.id).exists():
             self.pending_read.remove(user)
             # If there are no more pending then signal
             if not self.pending_read.exists():
-                self.signal_to_room('update_message', {
-                    'message_id': self.id,
-                    'kind': 'all_read'
-                })
+                self.signal_delivery_receipt('all_read')
 
 
 class Room(models.Model):

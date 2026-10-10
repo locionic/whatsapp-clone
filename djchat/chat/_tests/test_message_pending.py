@@ -10,7 +10,7 @@ reading. `Message.remove_user_from_pending` and `Message.mark_as_read` each take
 one user off their set and announce the outcome **only if nothing is left**:
 
     if not self.pending_reception.exists():
-        self.signal_to_room('update_message', {..., 'kind': 'all_received'})
+        self.signal_delivery_receipt('all_received')
 
 That "only if" is the whole contract, and it is what `User.vue` draws: one tick
 until `all_received`, two until `all_read`. It is also the last block of the TODO
@@ -48,10 +48,10 @@ KINDS = [
 def announced():
     """Every push the model attempts, as `(group_name, payload)`.
 
-    `signal_to_room` does `async_to_sync(channel_layer.group_send)(group, payload)`
-    and throws the return value away, so replacing `async_to_sync` with a recorder
-    captures the send itself. A layer spy rather than a socket because the
-    question here is whether a push happens at all: `receive_output` raises
+    `signal_delivery_receipt` does `async_to_sync(channel_layer.group_send)(group,
+    payload)` and throws the return value away, so replacing `async_to_sync` with
+    a recorder captures the send itself. A layer spy rather than a socket because
+    the question here is whether a push happens at all: `receive_output` raises
     `asyncio.TimeoutError` on timeout *and* cancels the communicator's
     application task, so a "nothing arrived" assertion that way would cost the
     socket for the rest of the test.
@@ -99,8 +99,7 @@ def test_the_announcement_waits_for_the_last_person(
         f'group_general_user_{user.id}' for user in users.values()}
     assert {json.dumps(payload, sort_keys=True) for _, payload in announced} == {
         json.dumps({
-            'type': 'chat_message',
-            'message': 'update_message',
+            'type': 'delivery_receipt',
             'data': {'message_id': message.id, 'kind': kind},
         }, sort_keys=True)}
     assert not getattr(message, pending_attr).exists()

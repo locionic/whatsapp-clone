@@ -185,6 +185,25 @@ class MessageViewSet(viewsets.ViewSet):
                     "message": "update",
                     'data': {}
                 })
+        # The `sent` receipt, to the author alone. Everyone else is told
+        # "update" above and refetches; the author has nothing to refetch,
+        # because they are the one who sent it -- their POST is what they were
+        # already waiting on, and the copy in the room comes back in that
+        # response. The receipt is what says the server took it.
+        #
+        # Sent from here and not from the message models for the same reason:
+        # the other two receipts are group-wide facts about a message that has
+        # been travelling for a while, and their trigger -- the last name
+        # falling off a pending set -- is a state change worth announcing from
+        # wherever it happens. This one is not a state change, it is the end of
+        # the request, and announcing it from `remove_user_from_pending` would
+        # fire it on every participant's first sync with a message they did not
+        # just send.
+        async_to_sync(channel_layer.group_send)(
+            f"group_general_user_{user.id}", {
+                "type": "delivery_receipt",
+                'data': {'message_id': message.id, 'kind': 'sent'},
+            })
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
