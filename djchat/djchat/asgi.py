@@ -7,56 +7,30 @@ For more information on this file, see
 https://docs.djangoproject.com/en/3.0/howto/deployment/asgi/
 """
 
-# import os
-# from django.core.asgi import get_asgi_application
-# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
-# application = get_asgi_application()
-
-# daphne
-# import os
-# from channels.routing import get_default_application
-# import django
-# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
-# django.setup()
-# application = get_default_application()
-
-# docs tutor
-# import os
-# from channels.routing import ProtocolTypeRouter
-# from django.core.asgi import get_asgi_application
-# from channels.auth import AuthMiddlewareStack
-# from channels.routing import ProtocolTypeRouter, URLRouter
-# import chat.routing
-# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djchat.settings')
-# application = ProtocolTypeRouter({
-#     "http": get_asgi_application(),
-#     'websocket': AuthMiddlewareStack(
-#         URLRouter(
-#             chat.routing.websocket_urlpatterns
-#         )
-#     ),
-# })
-
 import os
-import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "djchat.settings")
+
+# Import Django and Channels components after setting env var
+import django
 django.setup()
+
 from django.core.asgi import get_asgi_application
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 
 import chat.routing
-application = ProtocolTypeRouter({
-    "http": get_asgi_application(),
-    #  "websocket": AuthMiddlewareStack(
-    #      URLRouter(
-    #         chat.routing.websocket_urlpatterns
-    #     )
-    # ),
-     "websocket": AllowedHostsOriginValidator(AuthMiddlewareStack(
-         URLRouter(
-            chat.routing.websocket_urlpatterns
-        )
-    )),
-})
+
+def build_application():
+    """Build the ASGI application."""
+    http_application = get_asgi_application()
+    websocket_application = AuthMiddlewareStack(URLRouter(chat.routing.websocket_urlpatterns))
+    websocket_application = AllowedHostsOriginValidator(websocket_application)
+    
+    return ProtocolTypeRouter({
+        "http": http_application,
+        "websocket": websocket_application
+    })
+
+# Build application now that Django is configured
+application = build_application()
